@@ -36,13 +36,18 @@ type Message struct {
 	Msg   string   `msgpack:"msg"`
 }
 
+type Status struct {
+	Status  int8
+	Payload string
+}
+
 type User struct {
 	Aliases   []string `msgpack:"Aliases"`
 	Key       []byte   `msgpack:"key"`
 	Last_seen int64    `msgpack:"Last_seen"`
 	authed    bool     // This is used internally to track that state.
 	name      string   // TODO: REMOVE. Used for testing until we discuss how to treat non authed.
-	wall      chan Message
+	conn      net.Conn
 }
 
 func (o *User) Cleanup() {
@@ -64,14 +69,13 @@ func main() {
 			log.Println("Couldn't accept connection: ", err)
 		}
 
-		log.Println("Got connection ", conn.RemoteAddr())
+		log.Println("DEBUG| <-", conn.RemoteAddr())
 		go handleConnection(conn)
 	}
 }
 
 func handleConnection(c net.Conn) {
 	defer c.Close()
-	//	var bigBuf []byte
 	protocheck := make([]byte, 5)
 	// header, datum, len := b[:5], b[5], binary.BigEndian.Uint16(b[6:8])
 	_, err := c.Read(protocheck)
@@ -82,19 +86,26 @@ func handleConnection(c net.Conn) {
 
 	if string(protocheck) != helo {
 		log.Println("DEBUG| BAD HEADER:", string(protocheck))
-		c.Write([]byte("BAD HEADER, GOODBYE!"))
+		resp := Status{Status: -1, Payload: "invalid flexim header"}
+		out, err := msgpack.Marshal(resp)
+		if err != nil {
+			log.Println("Couldn't marshal bad header response.")
+		}
+		c.Write([]byte{byte(eStatus), byte(len(out))})
+		c.Write(out)
 		return
 	}
 
-	self := User{name: "guest#" + hex.EncodeToString([]byte(c.RemoteAddr().String()))} // hahahah
+	// TODO: Should this be a pointer rather than value for conn?
+	self := User{name: "guest#" + hex.EncodeToString([]byte(c.RemoteAddr().String())), conn: c} // hahahah
 	defer self.Cleanup()
-DatumProcessing:
+	// DatumProcessing:
 	for {
 		headers := make([]byte, 3)
 		_, err := c.Read(headers)
 		if err != nil {
-			log.Println("Couldn't fill byte buffer, possibly disconnect?")
-			break
+			log.Println("DEBUG| ->", c.RemoteAddr())
+			return
 		}
 
 		// Get datum information from headers.
@@ -121,9 +132,6 @@ DatumProcessing:
 				// For now, just let it go through with nothing in play until we
 				// plug in encryption.
 				if cmd.Payload[0] != "guest" {
-					if len(cmd.Payload) < 2 {
-						continue DatumProcessing
-					}
 					self.authed = true
 					self.name = cmd.Payload[0] // TODO: Use [1] for name
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
@@ -157,12 +165,23 @@ DatumProcessing:
 				log.Println("Error processing command datum: ", err)
 			}
 
-			for _, v := range onlineUsers {
-				if v.name == msg.To {
-					// TODO: Do things.
-					v.wall <- msg
-					continue DatumProcessing
+			if user, ok := onlineUsers[msg.To]; ok {
+				// Send it as we get it vs remarshalling
+				// TODO: Make this not silly.
+				t := make([]byte, 3)
+				t[0] = byte(dType)
+				binary.BigEndian.PutUint16(t[1:], dLength)
+				user.conn.Write(t)
+				user.conn.Write(datum)
+
+			} else {
+				status := Status{Payload: "user not available", Status: -1}
+				out, err := msgpack.Marshal(status)
+				if err != nil {
+					log.Println("Couldn't marhsal status for unavailable user")
 				}
+				c.Write([]byte{byte(eStatus), byte(len(out))})
+				c.Write(out)
 			}
 		}
 

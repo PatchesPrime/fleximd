@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"github.com/vmihailenco/msgpack"
 	"log"
-	"math/rand"
 	"net"
 )
 
@@ -23,11 +22,6 @@ const (
 	eUser
 	eStatus
 )
-
-type Roster []User
-type fleximd struct {
-	online Roster
-}
 
 type Command struct {
 	Cmd     string   `msgpack:"cmd"`
@@ -51,16 +45,20 @@ type User struct {
 	wall      chan Message
 }
 
-var srvObj fleximd
+func (o *User) Cleanup() {
+	delete(onlineUsers, o.name)
+}
+
+var onlineUsers map[string]User
 
 func main() {
+	onlineUsers = make(map[string]User)
 	ln, err := net.Listen("tcp", ":4321")
 	if err != nil {
 		log.Println("Couldn't opening listening socket: ", err)
 	}
 
 	for {
-		log.Println("Waiting for connection..")
 		conn, err := ln.Accept()
 		if err != nil {
 			log.Println("Couldn't accept connection: ", err)
@@ -78,15 +76,18 @@ func handleConnection(c net.Conn) {
 	// header, datum, len := b[:5], b[5], binary.BigEndian.Uint16(b[6:8])
 	_, err := c.Read(protocheck)
 	if err != nil {
-		log.Fatal("Couldn't read bytes for header..", err)
+		log.Println("Couldn't read bytes for header..", err)
+		return
 	}
 
 	if string(protocheck) != helo {
+		log.Println("DEBUG| BAD HEADER:", string(protocheck))
 		c.Write([]byte("BAD HEADER, GOODBYE!"))
-		c.Close()
+		return
 	}
 
-	self := User{} // hahahah
+	self := User{name: "guest#" + hex.EncodeToString([]byte(c.RemoteAddr().String()))} // hahahah
+	defer self.Cleanup()
 DatumProcessing:
 	for {
 		headers := make([]byte, 3)
@@ -120,24 +121,28 @@ DatumProcessing:
 				// For now, just let it go through with nothing in play until we
 				// plug in encryption.
 				if cmd.Payload[0] != "guest" {
+					if len(cmd.Payload) < 2 {
+						continue DatumProcessing
+					}
 					self.authed = true
-					self.name = cmd.Payload[0] + string(rand.Int())
+					self.name = cmd.Payload[0] // TODO: Use [1] for name
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
 					if err != nil {
 						log.Println("Couldn't decode hex of", cmd.Payload[0])
 					}
-				} else {
-					self.name = "guest" + string(rand.Int())
 				}
 
-				srvObj.online = append(srvObj.online, self)
+				onlineUsers[self.name] = self
 			case "ROSTER":
-				payload, err := msgpack.Marshal(srvObj.online)
+				var roster []User
+				for _, v := range onlineUsers {
+					roster = append(roster, v)
+				}
+				payload, err := msgpack.Marshal(roster)
 				if err != nil {
 					log.Println("Couldn't marshal roster:", err)
 				}
 				size := uint16(len(payload))
-				// log.Println("DEBUG| Sending", size, "bytes: ", srvObj.online)
 				c.Write([]byte{byte(eRoster), byte(size)})
 				c.Write(payload)
 			case "REGISTER":
@@ -152,11 +157,11 @@ DatumProcessing:
 				log.Println("Error processing command datum: ", err)
 			}
 
-			for _, v := range srvObj.online {
+			for _, v := range onlineUsers {
 				if v.name == msg.To {
 					// TODO: Do things.
 					v.wall <- msg
-					goto DatumProcessing
+					continue DatumProcessing
 				}
 			}
 		}

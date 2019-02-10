@@ -176,6 +176,7 @@ func handleConnection(c net.Conn) {
 						log.Println("Couldn't decode hex of", cmd.Payload[0])
 					}
 				}
+				self.Aliases = append(self.Aliases, self.name)
 				onlineUsers.Update(self)
 
 			case "ROSTER":
@@ -206,7 +207,7 @@ func handleConnection(c net.Conn) {
 				// TODO: Make this not silly.
 				log.Println("DEBUG| Message:", msg)
 
-				user.conn.Write(BuildHeaders(dType, len(datum)))
+				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
 
 			} else {
@@ -215,7 +216,7 @@ func handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Couldn't marhsal status for unavailable user")
 				}
-				c.Write(BuildHeaders(dType, len(out)))
+				c.Write(BuildHeaders(eStatus, len(out)))
 				c.Write(out)
 			}
 		}

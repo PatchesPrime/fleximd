@@ -77,13 +77,19 @@ type FleximRoster map[string]User
 
 func (o *FleximRoster) Update(u User) {
 	mutex.Lock()
+	defer mutex.Unlock()
 	onlineUsers[u.name] = u
-	mutex.Unlock()
 }
 func (o *FleximRoster) Delete(u User) {
 	mutex.Lock()
+	defer mutex.Unlock()
 	delete(onlineUsers, u.name)
-	mutex.Unlock()
+}
+func (o *FleximRoster) Exists(n string) (User, bool) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	user, ok := onlineUsers[n]
+	return user, ok
 }
 
 var onlineUsers FleximRoster
@@ -202,11 +208,10 @@ func handleConnection(c net.Conn) {
 				log.Println("Error processing command datum: ", err)
 			}
 
-			if user, ok := onlineUsers[msg.To]; ok {
+			if user, ok := onlineUsers.Exists(msg.To); ok {
 				// Send it as we get it vs remarshalling
 				// TODO: Make this not silly.
-				log.Println("DEBUG| Message:", msg)
-
+				log.Printf("DEBUG| Message: %+v", msg)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
 

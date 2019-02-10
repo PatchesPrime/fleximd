@@ -12,6 +12,9 @@ import (
 
 const helo = "\xA4FLEX"
 
+var mutex = &sync.Mutex{}
+var srv = fleximd{Online: make(FleximRoster), BindAddress: ":4321"}
+
 type datum int
 
 // My version of a golang enum.
@@ -25,78 +28,12 @@ const (
 	eStatus
 )
 
-type Datum interface {
-	BuildHeaders() ([]byte, error)
+type fleximd struct {
+	Online      FleximRoster
+	BindAddress string
 }
 
-type Command struct {
-	Cmd     string   `msgpack:"cmd"`
-	Payload []string `msgpack:"payload"`
-}
-
-type Message struct {
-	To    string   `msgpack:"to"`
-	From  string   `msgpack:"from"`
-	Flags []string `msgpack:"flags"`
-	Date  int64    `msgpack:"date"`
-	Msg   string   `msgpack:"msg"`
-}
-
-type Status struct {
-	Status  int8
-	Payload string
-}
-
-type User struct {
-	Aliases   []string `msgpack:"Aliases"`
-	Key       []byte   `msgpack:"key"`
-	Last_seen int64    `msgpack:"Last_seen"`
-	authed    bool     // This is used internally to track that state.
-	name      string   // TODO: REMOVE. Used for testing until we discuss how to treat non authed.
-	conn      net.Conn
-}
-
-func (o *User) Cleanup() {
-	onlineUsers.Delete(*o)
-}
-
-func BuildHeaders(d datum, l int) []byte {
-	// We need a 3 byte array
-	out := make([]byte, 3)
-
-	// The first one is always the datum type, follow by 2 bytes representing uint16
-	out[0] = byte(d)
-	binary.BigEndian.PutUint16(out[1:], uint16(l))
-
-	return out
-}
-
-// TODO: FleximRoster should probably be moved to another file.
-var mutex = &sync.Mutex{}
-
-type FleximRoster map[string]User
-
-func (o *FleximRoster) Update(u User) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	onlineUsers[u.name] = u
-}
-func (o *FleximRoster) Delete(u User) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	delete(onlineUsers, u.name)
-}
-func (o *FleximRoster) Exists(n string) (User, bool) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	user, ok := onlineUsers[n]
-	return user, ok
-}
-
-var onlineUsers FleximRoster
-
-func main() {
-	onlineUsers = make(map[string]User)
+func (o *fleximd) Init() {
 	ln, err := net.Listen("tcp", ":4321")
 	if err != nil {
 		log.Println("Couldn't opening listening socket: ", err)
@@ -111,6 +48,36 @@ func main() {
 		log.Println("DEBUG| <-", conn.RemoteAddr())
 		go handleConnection(conn)
 	}
+}
+
+type FleximRoster map[string]User
+
+func (o *FleximRoster) Update(u User) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	srv.Online[u.name] = u
+}
+func (o *FleximRoster) Delete(u User) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	delete(srv.Online, u.name)
+}
+func (o *FleximRoster) Exists(n string) (User, bool) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	user, ok := srv.Online[n]
+	return user, ok
+}
+
+func BuildHeaders(d datum, l int) []byte {
+	// We need a 3 byte array
+	out := make([]byte, 3)
+
+	// The first one is always the datum type, follow by 2 bytes representing uint16
+	out[0] = byte(d)
+	binary.BigEndian.PutUint16(out[1:], uint16(l))
+
+	return out
 }
 
 func handleConnection(c net.Conn) {
@@ -140,7 +107,7 @@ func handleConnection(c net.Conn) {
 	defer self.Cleanup()
 	// DatumProcessing:
 	for {
-		// log.Println("DEBUG|", onlineUsers)
+		// log.Println("DEBUG|", srv.Online)
 		headers := make([]byte, 3)
 		_, err := c.Read(headers)
 		if err != nil {
@@ -168,13 +135,14 @@ func handleConnection(c net.Conn) {
 			}
 			switch cmd.Cmd {
 			case "AUTH":
+				// log.Printf("DEBUG| %+v", cmd)
 				// Clearly we need to handle authentication, it's in the TODO
 				// For now, just let it go through with nothing in play until we
 				// plug in encryption.
 				if cmd.Payload[0] != "guest" {
 					self.authed = true
 					if len(cmd.Payload) >= 2 {
-						self.name = cmd.Payload[1]
+						self.name = cmd.Payload[1] + "#" + cmd.Payload[0]
 					} else {
 						self.name = cmd.Payload[0]
 					}
@@ -183,12 +151,16 @@ func handleConnection(c net.Conn) {
 						log.Println("Couldn't decode hex of", cmd.Payload[0])
 					}
 				}
+
+				// TODO: Temporary. We need to actually store these between starts.
 				self.Aliases = append(self.Aliases, self.name)
-				onlineUsers.Update(self)
+
+				// Add them to our online. They'll clean themselves up.
+				srv.Online.Update(self)
 
 			case "ROSTER":
 				var roster []User
-				for _, v := range onlineUsers {
+				for _, v := range srv.Online {
 					roster = append(roster, v)
 				}
 				payload, err := msgpack.Marshal(roster)
@@ -209,7 +181,7 @@ func handleConnection(c net.Conn) {
 				log.Println("Error processing command datum: ", err)
 			}
 
-			if user, ok := onlineUsers.Exists(msg.To); ok {
+			if user, ok := srv.Online.Exists(msg.To); ok {
 				// Send it as we get it vs remarshalling
 				// TODO: Make this not silly.
 				log.Printf("DEBUG| Message: %+v", msg)
@@ -228,4 +200,8 @@ func handleConnection(c net.Conn) {
 		}
 
 	}
+}
+
+func main() {
+	srv.Init()
 }

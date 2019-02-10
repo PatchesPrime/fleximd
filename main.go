@@ -50,17 +50,27 @@ func (o *fleximd) Init() {
 	}
 }
 
+// TODO: We need to make sure the string is case insensitive.
 type FleximRoster map[string]User
 
-func (o *FleximRoster) Update(u User) {
+func (o *FleximRoster) Append(u User) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	srv.Online[u.name] = u
+	srv.Online[u.HexifyKey()] = u
+}
+func (o *FleximRoster) Update(u User) {
+	if _, ok := o.Exists(u.HexifyKey()); ok {
+		mutex.Lock()
+		defer mutex.Unlock()
+		srv.Online[u.HexifyKey()] = u
+	} else {
+		o.Append(u)
+	}
 }
 func (o *FleximRoster) Delete(u User) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	delete(srv.Online, u.name)
+	delete(srv.Online, u.HexifyKey())
 }
 func (o *FleximRoster) Exists(n string) (User, bool) {
 	mutex.Lock()
@@ -142,10 +152,11 @@ func handleConnection(c net.Conn) {
 				if cmd.Payload[0] != "guest" {
 					self.authed = true
 					if len(cmd.Payload) >= 2 {
-						self.name = cmd.Payload[1] + "#" + cmd.Payload[0]
+						self.name = cmd.Payload[1]
 					} else {
 						self.name = cmd.Payload[0]
 					}
+					// TODO: Bit of a thing, thought I'd mention it: MAKE SURE THEY HAVE THE KEY.
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
 					if err != nil {
 						log.Println("Couldn't decode hex of", cmd.Payload[0])
@@ -153,6 +164,7 @@ func handleConnection(c net.Conn) {
 				}
 
 				// TODO: Temporary. We need to actually store these between starts.
+				// TODO: We should also make this happen on register.
 				self.Aliases = append(self.Aliases, self.name)
 
 				// Add them to our online. They'll clean themselves up.
@@ -172,7 +184,9 @@ func handleConnection(c net.Conn) {
 			case "REGISTER":
 				// TODO: replace with not a dummy. This currently only
 				// lasts as long as their connection.
-				self.name = cmd.Payload[0]
+				srv.Online.Delete(self)
+				self.name = cmd.Payload[0] + "#" + hex.EncodeToString(self.Key)
+				srv.Online.Update(self)
 			}
 		case eMessage:
 			var msg Message
@@ -181,9 +195,19 @@ func handleConnection(c net.Conn) {
 				log.Println("Error processing command datum: ", err)
 			}
 
+			if msg.From != self.HexifyKey() {
+				status := Status{Payload: "spoof detected, please refrain", Status: -1}
+				out, err := msgpack.Marshal(status)
+				if err != nil {
+					log.Println("Couldn't marhsal status for spoofer")
+				}
+				c.Write(BuildHeaders(eStatus, len(out)))
+				c.Write(out)
+				continue
+			}
+
 			if user, ok := srv.Online.Exists(msg.To); ok {
 				// Send it as we get it vs remarshalling
-				// TODO: Make this not silly.
 				log.Printf("DEBUG| Message: %+v", msg)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)

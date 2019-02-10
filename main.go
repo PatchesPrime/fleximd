@@ -6,6 +6,7 @@ import (
 	"github.com/vmihailenco/msgpack"
 	"log"
 	"net"
+	"sync"
 )
 
 const helo = "\xA4FLEX"
@@ -22,6 +23,10 @@ const (
 	eUser
 	eStatus
 )
+
+type Datum interface {
+	BuildHeaders() ([]byte, error)
+}
 
 type Command struct {
 	Cmd     string   `msgpack:"cmd"`
@@ -51,10 +56,37 @@ type User struct {
 }
 
 func (o *User) Cleanup() {
-	delete(onlineUsers, o.name)
+	onlineUsers.Delete(*o)
 }
 
-var onlineUsers map[string]User
+func BuildHeaders(d datum, l int) []byte {
+	// We need a 3 byte array
+	out := make([]byte, 3)
+
+	// The first one is always the datum type, follow by 2 bytes representing uint16
+	out[0] = byte(d)
+	binary.BigEndian.PutUint16(out[1:], uint16(l))
+
+	return out
+}
+
+// TODO: FleximRoster should probably be moved to another file.
+var mutex = &sync.Mutex{}
+
+type FleximRoster map[string]User
+
+func (o *FleximRoster) Update(u User) {
+	mutex.Lock()
+	onlineUsers[u.name] = u
+	mutex.Unlock()
+}
+func (o *FleximRoster) Delete(u User) {
+	mutex.Lock()
+	delete(onlineUsers, u.name)
+	mutex.Unlock()
+}
+
+var onlineUsers FleximRoster
 
 func main() {
 	onlineUsers = make(map[string]User)
@@ -91,7 +123,7 @@ func handleConnection(c net.Conn) {
 		if err != nil {
 			log.Println("Couldn't marshal bad header response.")
 		}
-		c.Write([]byte{byte(eStatus), byte(len(out))})
+		c.Write(BuildHeaders(eStatus, len(out)))
 		c.Write(out)
 		return
 	}
@@ -101,6 +133,7 @@ func handleConnection(c net.Conn) {
 	defer self.Cleanup()
 	// DatumProcessing:
 	for {
+		// log.Println("DEBUG|", onlineUsers)
 		headers := make([]byte, 3)
 		_, err := c.Read(headers)
 		if err != nil {
@@ -133,14 +166,18 @@ func handleConnection(c net.Conn) {
 				// plug in encryption.
 				if cmd.Payload[0] != "guest" {
 					self.authed = true
-					self.name = cmd.Payload[0] // TODO: Use [1] for name
+					if len(cmd.Payload) >= 2 {
+						self.name = cmd.Payload[1]
+					} else {
+						self.name = cmd.Payload[0]
+					}
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
 					if err != nil {
 						log.Println("Couldn't decode hex of", cmd.Payload[0])
 					}
 				}
+				onlineUsers.Update(self)
 
-				onlineUsers[self.name] = self
 			case "ROSTER":
 				var roster []User
 				for _, v := range onlineUsers {
@@ -150,8 +187,7 @@ func handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Couldn't marshal roster:", err)
 				}
-				size := uint16(len(payload))
-				c.Write([]byte{byte(eRoster), byte(size)})
+				c.Write(BuildHeaders(eRoster, len(payload)))
 				c.Write(payload)
 			case "REGISTER":
 				// TODO: replace with not a dummy. This currently only
@@ -168,10 +204,9 @@ func handleConnection(c net.Conn) {
 			if user, ok := onlineUsers[msg.To]; ok {
 				// Send it as we get it vs remarshalling
 				// TODO: Make this not silly.
-				t := make([]byte, 3)
-				t[0] = byte(dType)
-				binary.BigEndian.PutUint16(t[1:], dLength)
-				user.conn.Write(t)
+				log.Println("DEBUG| Message:", msg)
+
+				user.conn.Write(BuildHeaders(dType, len(datum)))
 				user.conn.Write(datum)
 
 			} else {
@@ -180,7 +215,7 @@ func handleConnection(c net.Conn) {
 				if err != nil {
 					log.Println("Couldn't marhsal status for unavailable user")
 				}
-				c.Write([]byte{byte(eStatus), byte(len(out))})
+				c.Write(BuildHeaders(dType, len(out)))
 				c.Write(out)
 			}
 		}

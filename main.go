@@ -142,7 +142,7 @@ func handleConnection(c net.Conn) {
 				if cmd.Payload[0] != "guest" {
 					self.authed = true
 					if len(cmd.Payload) >= 2 {
-						self.name = cmd.Payload[1] + "#" + cmd.Payload[0][:4]
+						self.name = cmd.Payload[1] + "#" + cmd.Payload[0]
 					} else {
 						self.name = cmd.Payload[0]
 					}

@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"github.com/vmihailenco/msgpack"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -152,7 +153,7 @@ func handleConnection(c net.Conn) {
 
 		// Extract Datum.
 		datum := make([]byte, dLength)
-		_, err = c.Read(datum)
+		_, err = io.ReadFull(c, datum)
 		if err != nil {
 			log.Println("Couldn't fill byte buffer, possibly disconnect?")
 			break

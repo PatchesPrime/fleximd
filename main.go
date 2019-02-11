@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"github.com/go-redis/redis"
 	"github.com/vmihailenco/msgpack"
 	"io"
 	"log"
@@ -14,8 +15,16 @@ import (
 // Was const, now just bytes.
 var helo = []byte("\xA4FLEX")
 
-var mutex = &sync.Mutex{}
-var srv = fleximd{Online: make(FleximRoster), BindAddress: ":4321"}
+var srv = fleximd{
+	Online:      make(FleximRoster),
+	BindAddress: ":4321",
+	store: redis.NewClient(&redis.Options{
+		Addr:     "192.168.1.14:32775", // TODO: Config file or cmd line argument
+		Password: "",
+		DB:       0,
+	}),
+	mutex: &sync.Mutex{},
+}
 
 type datum int
 
@@ -33,6 +42,8 @@ const (
 type fleximd struct {
 	Online      FleximRoster
 	BindAddress string
+	store       *redis.Client
+	mutex       *sync.Mutex
 }
 
 func (o *fleximd) Init() {
@@ -56,27 +67,63 @@ func (o *fleximd) Init() {
 type FleximRoster map[string]User
 
 func (o *FleximRoster) Append(u User) {
-	mutex.Lock()
-	defer mutex.Unlock()
+	srv.mutex.Lock()
+	defer srv.Online.RedisUnlock()
 	srv.Online[u.HexifyKey()] = u
+
+	// TODO: Stop code repeating.
+	// Update our state in redis
+	state, err := msgpack.Marshal(srv)
+	if err != nil {
+		log.Println("DEBUG| Couldn't marshal state for redis")
+	}
+	err = srv.store.Set("state", state, 0).Err()
+	if err != nil {
+		log.Println("!ERROR!| Couldn't backup state to redis!", err)
+	}
 }
 func (o *FleximRoster) Update(u User) {
 	if _, ok := o.Exists(u.HexifyKey()); ok {
-		mutex.Lock()
-		defer mutex.Unlock()
+		srv.mutex.Lock()
+		defer srv.Online.RedisUnlock()
 		srv.Online[u.HexifyKey()] = u
 	} else {
 		o.Append(u)
 	}
+
+	// TODO: Stop code repeating.
+	// Update our state in redis
+	state, err := msgpack.Marshal(srv)
+	if err != nil {
+		log.Println("DEBUG| Couldn't marshal state for redis")
+	}
+	err = srv.store.Set("state", state, 0).Err()
+	if err != nil {
+		log.Println("!ERROR!| Couldn't backup state to redis!", err)
+	}
 }
 func (o *FleximRoster) Delete(u User) {
-	mutex.Lock()
-	defer mutex.Unlock()
+	srv.mutex.Lock()
+	defer srv.Online.RedisUnlock()
 	delete(srv.Online, u.HexifyKey())
 }
+
+// The way I'm handling this feels wrong. TODO: Stop it.
+func (o *FleximRoster) RedisUnlock() {
+	state, err := msgpack.Marshal(srv)
+	if err != nil {
+		log.Println("DEBUG| Couldn't marshal state for redis")
+	}
+	err = srv.store.Set("state", state, 0).Err()
+	if err != nil {
+		log.Println("!ERROR!| Couldn't backup state to redis!", err)
+	}
+	srv.mutex.Unlock()
+}
+
 func (o *FleximRoster) Exists(n string) (User, bool) {
-	mutex.Lock()
-	defer mutex.Unlock()
+	srv.mutex.Lock()
+	defer srv.Online.RedisUnlock()
 	user, ok := srv.Online[n]
 	return user, ok
 }
@@ -215,6 +262,10 @@ func handleConnection(c net.Conn) {
 				user.conn.Write(datum)
 
 			} else {
+				// TODO: Stop code repeating.
+				// Update our state in redis
+				srv.store.RPush(msg.To+":offlines", msg)
+
 				status := Status{Payload: "user not available", Status: -1}
 				out, err := msgpack.Marshal(status)
 				if err != nil {

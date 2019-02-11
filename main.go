@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"github.com/vmihailenco/msgpack"
@@ -10,7 +11,8 @@ import (
 	"sync"
 )
 
-const helo = "\xA4FLEX"
+// Was const, now just bytes.
+var helo = []byte("\xA4FLEX")
 
 var mutex = &sync.Mutex{}
 var srv = fleximd{Online: make(FleximRoster), BindAddress: ":4321"}
@@ -94,13 +96,13 @@ func handleConnection(c net.Conn) {
 	defer c.Close()
 	protocheck := make([]byte, 5)
 	// header, datum, len := b[:5], b[5], binary.BigEndian.Uint16(b[6:8])
-	_, err := c.Read(protocheck)
+	_, err := io.ReadFull(c, protocheck)
 	if err != nil {
 		log.Println("Couldn't read bytes for header..", err)
 		return
 	}
 
-	if string(protocheck) != helo {
+	if bytes.Equal(protocheck, helo) {
 		log.Println("DEBUG| BAD HEADER:", string(protocheck))
 		resp := Status{Status: -1, Payload: "invalid flexim header"}
 		out, err := msgpack.Marshal(resp)
@@ -119,7 +121,7 @@ func handleConnection(c net.Conn) {
 	for {
 		// log.Println("DEBUG|", srv.Online)
 		headers := make([]byte, 3)
-		_, err := c.Read(headers)
+		_, err := io.ReadFull(c, headers)
 		if err != nil {
 			log.Println("DEBUG| ->", c.RemoteAddr())
 			return

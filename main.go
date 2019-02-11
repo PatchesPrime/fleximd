@@ -102,7 +102,7 @@ func handleConnection(c net.Conn) {
 		return
 	}
 
-	if bytes.Equal(protocheck, helo) {
+	if !bytes.Equal(protocheck, helo) {
 		log.Println("DEBUG| BAD HEADER:", string(protocheck))
 		resp := Status{Status: -1, Payload: "invalid flexim header"}
 		out, err := msgpack.Marshal(resp)

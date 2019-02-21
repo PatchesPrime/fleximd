@@ -14,12 +14,6 @@ import (
 // Was const, now just bytes.
 var helo = []byte("\xA4FLEX")
 
-var srv = fleximd{
-	Online:      make(FleximRoster),
-	BindAddress: ":4321",
-	mutex:       &sync.Mutex{},
-}
-
 type datum int
 
 // My version of a golang enum.
@@ -33,59 +27,7 @@ const (
 	eStatus
 )
 
-type fleximd struct {
-	Online      FleximRoster
-	BindAddress string
-	mutex       *sync.Mutex
-}
-
-func (o *fleximd) Init() {
-	ln, err := net.Listen("tcp", ":4321")
-	if err != nil {
-		log.Println("Couldn't opening listening socket: ", err)
-	}
-
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			log.Println("Couldn't accept connection: ", err)
-		}
-
-		log.Println("DEBUG| <-", conn.RemoteAddr())
-		go handleConnection(conn)
-	}
-}
-
-// TODO: We need to make sure the string is case insensitive.
-type FleximRoster map[string]User
-
-func (o *FleximRoster) Append(u User) {
-	srv.mutex.Lock()
-	defer srv.mutex.Unlock()
-	srv.Online[u.HexifyKey()] = u
-}
-func (o *FleximRoster) Update(u User) {
-	if _, ok := o.Exists(u.HexifyKey()); ok {
-		srv.mutex.Lock()
-		defer srv.mutex.Unlock()
-		srv.Online[u.HexifyKey()] = u
-	} else {
-		o.Append(u)
-	}
-}
-func (o *FleximRoster) Delete(u User) {
-	srv.mutex.Lock()
-	defer srv.mutex.Unlock()
-	delete(srv.Online, u.HexifyKey())
-}
-
-func (o *FleximRoster) Exists(n string) (User, bool) {
-	srv.mutex.Lock()
-	defer srv.mutex.Unlock()
-	user, ok := srv.Online[n]
-	return user, ok
-}
-
+// TODO: Refactor this out. Only used by users now. Shouldn't be too hard.
 func BuildHeaders(d datum, l int) []byte {
 	// We need a 3 byte array
 	out := make([]byte, 3)
@@ -100,7 +42,6 @@ func BuildHeaders(d datum, l int) []byte {
 func handleConnection(c net.Conn) {
 	defer c.Close()
 	protocheck := make([]byte, 5)
-	// header, datum, len := b[:5], b[5], binary.BigEndian.Uint16(b[6:8])
 	_, err := io.ReadFull(c, protocheck)
 	if err != nil {
 		log.Println("Couldn't read bytes for header..", err)
@@ -114,8 +55,7 @@ func handleConnection(c net.Conn) {
 		if err != nil {
 			log.Println("Couldn't marshal bad header response.")
 		}
-		c.Write(BuildHeaders(eStatus, len(out)))
-		c.Write(out)
+		srv.Respond(eStatus, out)
 		return
 	}
 
@@ -182,12 +122,7 @@ func handleConnection(c net.Conn) {
 				for _, v := range srv.Online {
 					roster = append(roster, v)
 				}
-				payload, err := msgpack.Marshal(roster)
-				if err != nil {
-					log.Println("Couldn't marshal roster:", err)
-				}
-				c.Write(BuildHeaders(eRoster, len(payload)))
-				c.Write(payload)
+				srv.Respond(eRoster, roster)
 			case "REGISTER":
 				// TODO: replace with not a dummy. This currently only
 				// lasts as long as their connection.
@@ -204,12 +139,7 @@ func handleConnection(c net.Conn) {
 
 			if msg.From != self.HexifyKey() {
 				status := Status{Payload: "spoof detected, please refrain", Status: -1}
-				out, err := msgpack.Marshal(status)
-				if err != nil {
-					log.Println("Couldn't marhsal status for spoofer")
-				}
-				c.Write(BuildHeaders(eStatus, len(out)))
-				c.Write(out)
+				srv.Respond(eStatus, status)
 				continue
 			}
 
@@ -221,16 +151,18 @@ func handleConnection(c net.Conn) {
 
 			} else {
 				status := Status{Payload: "user not available", Status: -1}
-				out, err := msgpack.Marshal(status)
-				if err != nil {
-					log.Println("Couldn't marhsal status for unavailable user")
-				}
-				c.Write(BuildHeaders(eStatus, len(out)))
-				c.Write(out)
+				srv.Respond(eStatus, status)
+				continue
 			}
 		}
 
 	}
+}
+
+var srv = fleximd{
+	Online:      make(FleximRoster),
+	BindAddress: ":4321",
+	mutex:       &sync.Mutex{},
 }
 
 func main() {

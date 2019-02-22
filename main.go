@@ -8,7 +8,10 @@ import (
 	"io"
 	"log"
 	"net"
+	"os/exec"
+	"strings"
 	"sync"
+	"time"
 )
 
 // Was const, now just bytes.
@@ -97,7 +100,7 @@ func handleConnection(c net.Conn) {
 				// For now, just let it go through with nothing in play until we
 				// plug in encryption.
 				if cmd.Payload[0] != "guest" {
-					self.authed = true
+					// self.authed = true
 					if len(cmd.Payload) >= 2 {
 						self.name = cmd.Payload[1]
 					} else {
@@ -110,18 +113,20 @@ func handleConnection(c net.Conn) {
 					}
 				}
 
+				// Stop right here if the user is already online.
 				if _, ok := srv.Online.Exists(self.HexifyKey()); ok {
 					status := Status{Status: -1, Payload: "user already logged in"}
 					srv.Respond(eStatus, status)
 					continue
-				} else {
-					// TODO: Temporary. We need to actually store these between starts.
-					// TODO: We should also make this happen on register.
-					self.Aliases = append(self.Aliases, self.name)
-
-					// Add them to our online. They'll clean themselves up.
-					srv.Online.Update(self)
 				}
+
+				c, err := exec.Command("uuidgen").Output()
+				if err != nil {
+					log.Fatal("Couldn't generate uuid")
+				}
+				// Send the Auth datum
+				self.challenge = Auth{Date: time.Now().Unix(), Challenge: strings.TrimSuffix(string(c), "\n")}
+				srv.Respond(eAuth, self.challenge)
 
 			case "ROSTER":
 				var roster []User
@@ -136,6 +141,25 @@ func handleConnection(c net.Conn) {
 				self.name = cmd.Payload[0] + "#" + hex.EncodeToString(self.Key)
 				srv.Online.Update(self)
 			}
+
+		case eAuthResponse:
+			var resp AuthResponse
+			err = msgpack.Unmarshal(datum, &resp)
+			if err != nil {
+				log.Println("Something went wrong unmarshalling AuthResp", err)
+			}
+
+			// TODO: It'll do for now, but pretty it up. challenge.Challenge? Please.
+			if resp.Challenge == self.challenge.Challenge && !self.authed {
+				// They seem to be who they claim to be..
+				self.authed = true
+				// TODO: Temporary. We need to actually store these between starts.
+				// TODO: We should also make this happen on register.
+				self.Aliases = append(self.Aliases, self.name)
+				srv.Online.Update(self)
+				srv.Respond(eUser, self)
+			}
+
 		case eMessage:
 			var msg Message
 			err = msgpack.Unmarshal(datum, &msg)
@@ -155,7 +179,7 @@ func handleConnection(c net.Conn) {
 					srv.Respond(eStatus, status)
 				}
 				// Send it as we get it vs remarshalling
-				log.Printf("DEBUG| Message: %+v", msg)
+				log.Printf("DEBUG| MSG: %s -> %s", msg.From, msg.To)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
 

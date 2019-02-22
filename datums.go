@@ -9,6 +9,16 @@ type Datum interface {
 	BuildHeaders() ([]byte, error)
 }
 
+type Auth struct {
+	Date      int64  `msgpack:"date"`
+	Challenge string `msgpack:"challenge"`
+	LastSeen  int64  `msgpack:"last_seen"`
+}
+
+type AuthResponse struct {
+	Challenge string `msgpack:"challenge"`
+}
+
 type Command struct {
 	Cmd     string   `msgpack:"cmd"`
 	Payload []string `msgpack:"payload"`
@@ -34,6 +44,7 @@ type User struct {
 	authed    bool     // This is used internally to track that state.
 	name      string   // TODO: REMOVE. Used for testing until we discuss how to treat non authed.
 	conn      net.Conn
+	challenge Auth
 }
 
 func (o *User) Cleanup() {

@@ -110,12 +110,18 @@ func handleConnection(c net.Conn) {
 					}
 				}
 
-				// TODO: Temporary. We need to actually store these between starts.
-				// TODO: We should also make this happen on register.
-				self.Aliases = append(self.Aliases, self.name)
+				if _, ok := srv.Online.Exists(self.HexifyKey()); ok {
+					status := Status{Status: -1, Payload: "user already logged in"}
+					srv.Respond(eStatus, status)
+					continue
+				} else {
+					// TODO: Temporary. We need to actually store these between starts.
+					// TODO: We should also make this happen on register.
+					self.Aliases = append(self.Aliases, self.name)
 
-				// Add them to our online. They'll clean themselves up.
-				srv.Online.Update(self)
+					// Add them to our online. They'll clean themselves up.
+					srv.Online.Update(self)
+				}
 
 			case "ROSTER":
 				var roster []User
@@ -144,6 +150,10 @@ func handleConnection(c net.Conn) {
 			}
 
 			if user, ok := srv.Online.Exists(msg.To); ok {
+				if user.authed && !self.authed {
+					status := Status{Status: -1, Payload: "spim blocker: please auth to msg authed users"}
+					srv.Respond(eStatus, status)
+				}
 				// Send it as we get it vs remarshalling
 				log.Printf("DEBUG| Message: %+v", msg)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))

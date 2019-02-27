@@ -8,7 +8,9 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,8 @@ import (
 
 // Was const, now just bytes.
 var helo = []byte("\xA4FLEX")
+
+const redis_prefix = "fleximd:offlines:"
 
 type datum int
 
@@ -155,6 +159,7 @@ func handleConnection(c net.Conn) {
 				self.authed = true
 				// TODO: Temporary. We need to actually store these between starts.
 				// TODO: We should also make this happen on register.
+				// TODO: remove duplicates bug
 				self.Aliases = append(self.Aliases, self.name)
 				srv.Online.Update(self)
 				srv.Respond(eUser, self)
@@ -182,9 +187,9 @@ func handleConnection(c net.Conn) {
 				log.Printf("DEBUG| MSG: %s -> %s", msg.From, msg.To)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
-
 			} else {
-				status := Status{Payload: "user not available", Status: -1}
+				srv.db.Append(redis_prefix+msg.To, string(datum))
+				status := Status{Payload: "user not available; storing offline", Status: 1}
 				srv.Respond(eStatus, status)
 				continue
 			}
@@ -200,5 +205,13 @@ var srv = fleximd{
 }
 
 func main() {
+	// For cleanup of active sessions
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		<-c
+		srv.Shutdown()
+	}()
+
 	srv.Init()
 }

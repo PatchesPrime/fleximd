@@ -2,9 +2,11 @@ package main
 
 import (
 	"encoding/binary"
+	"github.com/go-redis/redis"
 	"github.com/vmihailenco/msgpack"
 	"log"
 	"net"
+	"os"
 	"sync"
 )
 
@@ -13,9 +15,17 @@ type fleximd struct {
 	BindAddress string
 	mutex       *sync.Mutex
 	conn        net.Conn
+	db          *redis.Client
 }
 
 func (o *fleximd) Init() {
+	// Set our DB.
+	o.db = redis.NewClient(&redis.Options{
+		Addr:     "192.168.1.14:32768",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
 	ln, err := net.Listen("tcp", ":4321")
 	if err != nil {
 		log.Println("Couldn't opening listening socket: ", err)
@@ -31,6 +41,29 @@ func (o *fleximd) Init() {
 		o.conn = conn
 		go handleConnection(conn)
 	}
+}
+
+func (o *fleximd) Shutdown() {
+	var cursor uint64
+	for {
+		keys, cursor, err := srv.db.Scan(cursor, "fleximd:sessions:*", 10).Result()
+		if err != nil {
+			log.Println("DEBUG| Couldn't get scan of redis:", err)
+		}
+
+		for _, k := range keys {
+			_, err := srv.db.Del(k).Result()
+			if err != nil {
+				log.Fatal("Couldn't get redis key:", err)
+			}
+		}
+
+		// End when we're done.
+		if cursor == 0 {
+			break
+		}
+	}
+	os.Exit(0)
 }
 
 // TODO: Remove super genric "interface{}" for something more specific.

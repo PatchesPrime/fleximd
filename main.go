@@ -144,6 +144,22 @@ func handleConnection(c net.Conn) {
 				srv.Online.Delete(self)
 				self.name = cmd.Payload[0] + "#" + hex.EncodeToString(self.Key)
 				srv.Online.Update(self)
+			case "OFFLINES":
+				key := redis_prefix + self.HexifyKey()
+				l, err := srv.db.LLen(key).Result()
+				if err != nil {
+					log.Fatal("Couldn't get length of users offline array", err)
+				}
+				for i := int64(0); i < l; i++ {
+					var msg Message
+					thing, err := srv.db.LPop(redis_prefix + self.HexifyKey()).Result()
+					if err != nil {
+						log.Fatal("Couldn't pop off users offlines:", err)
+					}
+					err = msgpack.Unmarshal([]byte(thing), &msg)
+					srv.Respond(eMessage, msg)
+				}
+
 			}
 
 		case eAuthResponse:
@@ -188,7 +204,7 @@ func handleConnection(c net.Conn) {
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
 			} else {
-				srv.db.Append(redis_prefix+msg.To, string(datum))
+				srv.db.RPush(redis_prefix+msg.To, datum)
 				status := Status{Payload: "user not available; storing offline", Status: 1}
 				srv.Respond(eStatus, status)
 				continue

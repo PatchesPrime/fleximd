@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"github.com/go-redis/redis"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack"
 	"net"
 	"os"
@@ -16,7 +16,11 @@ type fleximd struct {
 	mutex       *sync.Mutex
 	conn        net.Conn
 	db          *redis.Client
+	logger      *logrus.Logger
 }
+
+// TODO: MONKEY PATCH GET RID OF IT
+var log logrus.Logger
 
 func (o *fleximd) Init() {
 	// Set our DB.
@@ -26,18 +30,23 @@ func (o *fleximd) Init() {
 		DB:       0,  // use default DB
 	})
 
+	log = *o.logger
+
 	ln, err := net.Listen("tcp", o.BindAddress)
 	if err != nil {
-		log.Println("Couldn't opening listening socket: ", err)
+		log.Error("Couldn't opening listening socket: ", err)
 	}
 
+	log.Debugf("fleximd - starting with state:\n\t%+v", o)
+
 	for {
+		log.Debug("Waiting for client..")
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Println("Couldn't accept connection: ", err)
+			log.Error("Couldn't accept connection: ", err)
 		}
 
-		log.Println("DEBUG| <-", conn.RemoteAddr())
+		log.Debug("CLIENT:", conn.RemoteAddr())
 		o.conn = conn
 		go handleConnection(conn)
 	}
@@ -48,7 +57,7 @@ func (o *fleximd) Shutdown() {
 	for {
 		keys, cursor, err := srv.db.Scan(cursor, "fleximd:sessions:*", 10).Result()
 		if err != nil {
-			log.Println("DEBUG| Couldn't get scan of redis:", err)
+			log.Debug("Couldn't get scan of redis:", err)
 		}
 
 		for _, k := range keys {
@@ -71,7 +80,7 @@ func (o *fleximd) Respond(t datum, d interface{}) {
 	// Go ahead and attempt to marshal the datum
 	out, err := msgpack.Marshal(d)
 	if err != nil {
-		log.Println("Couldn't marshal datum: ", err)
+		log.Error("Couldn't marshal datum: ", err)
 	}
 	// All datum transmissions begin with metadata
 	metadata := make([]byte, 3)

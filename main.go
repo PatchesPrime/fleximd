@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"flag"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack"
 	"io"
 	"net"
@@ -49,19 +49,22 @@ func BuildHeaders(d datum, l int) []byte {
 
 func handleConnection(c net.Conn) {
 	defer c.Close()
+
+	var log = *srv.logger // fite me irl
+
 	protocheck := make([]byte, 5)
 	_, err := io.ReadFull(c, protocheck)
 	if err != nil {
-		log.Println("Couldn't read bytes for header..", err)
+		log.Error("Couldn't read bytes for header..", err)
 		return
 	}
 
 	if !bytes.Equal(protocheck, helo) {
-		log.Println("DEBUG| BAD HEADER:", string(protocheck))
+		log.Debug("BAD HEADER:", string(protocheck))
 		resp := Status{Status: -1, Payload: "invalid flexim header"}
 		out, err := msgpack.Marshal(resp)
 		if err != nil {
-			log.Println("Couldn't marshal bad header response.")
+			log.Error("Couldn't marshal bad header response.", err)
 		}
 		srv.Respond(eStatus, out)
 		return
@@ -76,34 +79,33 @@ func handleConnection(c net.Conn) {
 		headers := make([]byte, 3)
 		_, err := io.ReadFull(c, headers)
 		if err != nil {
-			log.Println("DEBUG| ->", c.RemoteAddr())
+			log.Debug("Client Hangup: ", c.RemoteAddr())
 			return
 		}
 
 		// Get datum information from headers.
 		dType, dLength := datum(headers[0]), binary.BigEndian.Uint16(headers[1:])
-		log.Println("DEBUG| PARSED HEADERS, TYPE:", dType, " LEN:", dLength)
+		log.Debug("PARSED HEADERS, TYPE:", dType, " LEN:", dLength)
 
 		// Extract Datum.
 		datum := make([]byte, dLength)
 		_, err = io.ReadFull(c, datum)
 		if err != nil {
-			log.Println("Couldn't fill byte buffer, possibly disconnect?")
+			log.Error("Couldn't fill byte buffer, possibly disconnect?")
 			break
 		}
-		log.Println("DEBUG| READ DATUM AS: ", datum)
+		log.Debug("RAW DATUM BYTES: ", datum)
 
 		switch dType {
 		case eCommand:
-			log.Println("DEBUG| Handling CMD Datum..")
 			var cmd Command
 			err = msgpack.Unmarshal(datum, &cmd)
 			if err != nil {
-				log.Println("Error processing command datum: ", err)
+				log.Error("Error processing command datum: ", err)
 			}
 			switch cmd.Cmd {
 			case "AUTH":
-				log.Println("DEBUG| CMD is auth..")
+				log.Debug("CMD is auth..")
 				// log.Printf("DEBUG| %+v", cmd)
 				// Clearly we need to handle authentication, it's in the TODO
 				// For now, just let it go through with nothing in play until we
@@ -118,7 +120,7 @@ func handleConnection(c net.Conn) {
 					// TODO: Bit of a thing, thought I'd mention it: MAKE SURE THEY HAVE THE KEY.
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
 					if err != nil {
-						log.Println("DEBUG| Couldn't decode hex of", cmd.Payload[0])
+						log.Error("Couldn't decode hex of", cmd.Payload[0])
 					}
 				}
 
@@ -176,7 +178,7 @@ func handleConnection(c net.Conn) {
 			var resp AuthResponse
 			err = msgpack.Unmarshal(datum, &resp)
 			if err != nil {
-				log.Println("Something went wrong unmarshalling AuthResp", err)
+				log.Error("Something went wrong unmarshalling AuthResp", err)
 			}
 
 			// TODO: It'll do for now, but pretty it up. challenge.Challenge? Please.
@@ -199,7 +201,7 @@ func handleConnection(c net.Conn) {
 			var msg Message
 			err = msgpack.Unmarshal(datum, &msg)
 			if err != nil {
-				log.Println("Error processing command datum: ", err)
+				log.Error("Error processing command datum: ", err)
 			}
 
 			if msg.From != self.HexifyKey() {
@@ -215,7 +217,7 @@ func handleConnection(c net.Conn) {
 					continue
 				}
 				// Send it as we get it vs remarshalling
-				log.Printf("DEBUG| MSG: %s -> %s", msg.From, msg.To)
+				log.Debug("MSG: %s -> %s", msg.From, msg.To)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
 			} else {
@@ -233,6 +235,7 @@ var srv = fleximd{
 	Online:      make(FleximRoster),
 	BindAddress: ":4321",
 	mutex:       &sync.Mutex{},
+	logger:      logrus.New(),
 }
 
 func main() {
@@ -245,8 +248,13 @@ func main() {
 	}()
 
 	addr := flag.String("addr", ":4321", "The binding address the server should use.")
+	debug := flag.Bool("debug", false, "Set the loglevel to debug?")
 	flag.Parse()
 
 	srv.BindAddress = *addr
+	if *debug {
+		srv.logger.Level = logrus.DebugLevel
+	}
+
 	srv.Init()
 }

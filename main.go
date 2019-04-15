@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"flag"
+	log "github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack"
 	"io"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -81,6 +82,7 @@ func handleConnection(c net.Conn) {
 
 		// Get datum information from headers.
 		dType, dLength := datum(headers[0]), binary.BigEndian.Uint16(headers[1:])
+		log.Println("DEBUG| PARSED HEADERS, TYPE:", dType, " LEN:", dLength)
 
 		// Extract Datum.
 		datum := make([]byte, dLength)
@@ -89,9 +91,11 @@ func handleConnection(c net.Conn) {
 			log.Println("Couldn't fill byte buffer, possibly disconnect?")
 			break
 		}
+		log.Println("DEBUG| READ DATUM AS: ", datum)
 
 		switch dType {
 		case eCommand:
+			log.Println("DEBUG| Handling CMD Datum..")
 			var cmd Command
 			err = msgpack.Unmarshal(datum, &cmd)
 			if err != nil {
@@ -99,6 +103,7 @@ func handleConnection(c net.Conn) {
 			}
 			switch cmd.Cmd {
 			case "AUTH":
+				log.Println("DEBUG| CMD is auth..")
 				// log.Printf("DEBUG| %+v", cmd)
 				// Clearly we need to handle authentication, it's in the TODO
 				// For now, just let it go through with nothing in play until we
@@ -113,7 +118,7 @@ func handleConnection(c net.Conn) {
 					// TODO: Bit of a thing, thought I'd mention it: MAKE SURE THEY HAVE THE KEY.
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
 					if err != nil {
-						log.Println("Couldn't decode hex of", cmd.Payload[0])
+						log.Println("DEBUG| Couldn't decode hex of", cmd.Payload[0])
 					}
 				}
 
@@ -145,6 +150,11 @@ func handleConnection(c net.Conn) {
 				self.name = cmd.Payload[0] + "#" + hex.EncodeToString(self.Key)
 				srv.Online.Update(self)
 			case "OFFLINES":
+				if !self.authed {
+					status := Status{Payload: "permission denied; please auth", Status: -1}
+					srv.Respond(eStatus, status)
+					continue
+				}
 				key := redis_prefix + self.HexifyKey()
 				l, err := srv.db.LLen(key).Result()
 				if err != nil {
@@ -173,12 +183,16 @@ func handleConnection(c net.Conn) {
 			if resp.Challenge == self.challenge.Challenge && !self.authed {
 				// They seem to be who they claim to be..
 				self.authed = true
+				self.challenge = Auth{} // Empty the value to not store old key in memory longer than needed.
 				// TODO: Temporary. We need to actually store these between starts.
 				// TODO: We should also make this happen on register.
 				// TODO: remove duplicates bug
 				self.Aliases = append(self.Aliases, self.name)
 				srv.Online.Update(self)
 				srv.Respond(eUser, self)
+			} else {
+				status := Status{Payload: "challenge failed; bye", Status: -1}
+				srv.Respond(eStatus, status)
 			}
 
 		case eMessage:
@@ -196,8 +210,9 @@ func handleConnection(c net.Conn) {
 
 			if user, ok := srv.Online.Exists(msg.To); ok {
 				if user.authed && !self.authed {
-					status := Status{Status: -1, Payload: "spim blocker: please auth to msg authed users"}
+					status := Status{Status: -1, Payload: "spim blocker: if one user is authed both must be"}
 					srv.Respond(eStatus, status)
+					continue
 				}
 				// Send it as we get it vs remarshalling
 				log.Printf("DEBUG| MSG: %s -> %s", msg.From, msg.To)
@@ -229,5 +244,9 @@ func main() {
 		srv.Shutdown()
 	}()
 
+	addr := flag.String("addr", ":4321", "The binding address the server should use.")
+	flag.Parse()
+
+	srv.BindAddress = *addr
 	srv.Init()
 }

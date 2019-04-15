@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/binary"
 	"github.com/go-redis/redis"
+	log "github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack"
-	"log"
 	"net"
 	"os"
 	"sync"
@@ -26,7 +26,7 @@ func (o *fleximd) Init() {
 		DB:       0,  // use default DB
 	})
 
-	ln, err := net.Listen("tcp", ":4321")
+	ln, err := net.Listen("tcp", o.BindAddress)
 	if err != nil {
 		log.Println("Couldn't opening listening socket: ", err)
 	}

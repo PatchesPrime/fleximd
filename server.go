@@ -19,9 +19,6 @@ type fleximd struct {
 	logger      *logrus.Logger
 }
 
-// TODO: MONKEY PATCH GET RID OF IT
-var log logrus.Logger
-
 func (o *fleximd) Init() {
 	// Set our DB.
 	o.db = redis.NewClient(&redis.Options{
@@ -30,23 +27,21 @@ func (o *fleximd) Init() {
 		DB:       0,  // use default DB
 	})
 
-	log = *o.logger
-
 	ln, err := net.Listen("tcp", o.BindAddress)
 	if err != nil {
-		log.Error("Couldn't opening listening socket: ", err)
+		o.logger.Error("Couldn't opening listening socket: ", err)
 	}
 
-	log.Debugf("fleximd - starting with state:\n\t%+v", o)
+	o.logger.Debugf("fleximd - starting with state:\n\t%+v", o)
 
 	for {
-		log.Debug("Waiting for client..")
+		o.logger.Debug("Waiting for client..")
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Error("Couldn't accept connection: ", err)
+			o.logger.Error("Couldn't accept connection: ", err)
 		}
 
-		log.Debug("CLIENT:", conn.RemoteAddr())
+		o.logger.Debug("CLIENT:", conn.RemoteAddr())
 		o.conn = conn
 		go handleConnection(conn)
 	}
@@ -57,13 +52,13 @@ func (o *fleximd) Shutdown() {
 	for {
 		keys, cursor, err := srv.db.Scan(cursor, "fleximd:sessions:*", 10).Result()
 		if err != nil {
-			log.Debug("Couldn't get scan of redis:", err)
+			o.logger.Debug("Couldn't get scan of redis:", err)
 		}
 
 		for _, k := range keys {
 			_, err := srv.db.Del(k).Result()
 			if err != nil {
-				log.Fatal("Couldn't get redis key:", err)
+				o.logger.Fatal("Couldn't get redis key:", err)
 			}
 		}
 
@@ -77,10 +72,11 @@ func (o *fleximd) Shutdown() {
 
 // TODO: Remove super genric "interface{}" for something more specific.
 func (o *fleximd) Respond(t datum, d interface{}) {
+	o.logger.Debugf("SENDING RESPONSE: %+v", d)
 	// Go ahead and attempt to marshal the datum
 	out, err := msgpack.Marshal(d)
 	if err != nil {
-		log.Error("Couldn't marshal datum: ", err)
+		o.logger.Error("Couldn't marshal datum: ", err)
 	}
 	// All datum transmissions begin with metadata
 	metadata := make([]byte, 3)

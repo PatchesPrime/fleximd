@@ -248,12 +248,19 @@ func main() {
 	}()
 
 	addr := flag.String("addr", ":4321", "The binding address the server should use.")
-	debug := flag.Bool("debug", false, "Set the loglevel to debug?")
+	debug := flag.Int("loglevel", 1, "Set the loglevel; 0: debug, 1: info, 2: error")
 	flag.Parse()
 
 	srv.BindAddress = *addr
-	if *debug {
+
+	// Build up our logger.
+	switch *debug {
+	case 0:
 		srv.logger.Level = logrus.DebugLevel
+	case 1:
+		srv.logger.Level = logrus.InfoLevel
+	case 2:
+		srv.logger.Level = logrus.ErrorLevel
 	}
 
 	srv.Init()

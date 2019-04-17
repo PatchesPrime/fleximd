@@ -32,16 +32,15 @@ func (o *fleximd) Init() {
 		o.logger.Error("Couldn't opening listening socket: ", err)
 	}
 
-	o.logger.Debugf("fleximd - starting with state:\n\t%+v", o)
-
+	o.logger.Info("fleximd started!")
 	for {
-		o.logger.Debug("Waiting for client..")
+		o.logger.Debug("Listening..")
 		conn, err := ln.Accept()
 		if err != nil {
 			o.logger.Error("Couldn't accept connection: ", err)
 		}
 
-		o.logger.Debug("CLIENT:", conn.RemoteAddr())
+		o.logger.Debug("CLIENT: ", conn.RemoteAddr())
 		o.conn = conn
 		go handleConnection(conn)
 	}

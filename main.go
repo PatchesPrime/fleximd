@@ -259,15 +259,14 @@ func main() {
 	switch *debug {
 	case 0:
 		srv.logger.Level = logrus.DebugLevel
+		// Report the calling function.
+		srv.logger.SetReportCaller(true)
 		srv.logger.SetFormatter(&logrus.JSONFormatter{PrettyPrint: true})
 	case 1:
 		srv.logger.Level = logrus.InfoLevel
 	case 2:
 		srv.logger.Level = logrus.ErrorLevel
 	}
-
-	// Report the calling function.
-	srv.logger.SetReportCaller(true)
 
 	srv.Init()
 }

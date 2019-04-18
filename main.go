@@ -248,7 +248,7 @@ func main() {
 	}()
 
 	addr := flag.String("addr", ":4321", "The binding address the server should use.")
-	debug := flag.Int("log", 1, "Set the log level; 0: debug, 1: info")
+	debug := flag.Bool("debug", false, "Set the log level to debug")
 	flag.Parse()
 
 	// Ensure server is setup how we like.
@@ -256,14 +256,11 @@ func main() {
 	srv.logger.SetFormatter(&logrus.JSONFormatter{})
 
 	// What level logging?
-	switch *debug {
-	case 0:
+	if *debug {
 		srv.logger.Level = logrus.DebugLevel
 		// Report the calling function.
 		srv.logger.SetReportCaller(true)
 		srv.logger.SetFormatter(&logrus.JSONFormatter{PrettyPrint: true})
-	case 1:
-		srv.logger.Level = logrus.InfoLevel
 	}
 
 	srv.Init()

@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"flag"
+	"fmt"
+	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack"
 	"io"
@@ -73,6 +75,7 @@ func handleConnection(c net.Conn) {
 	// TODO: Should this be a pointer rather than value for conn?
 	self := User{name: "guest#" + hex.EncodeToString([]byte(c.RemoteAddr().String())), conn: c} // hahahah
 	defer self.Cleanup()
+
 	// DatumProcessing:
 	for {
 		// log.Println("DEBUG|", srv.Online)
@@ -191,7 +194,18 @@ func handleConnection(c net.Conn) {
 				// TODO: remove duplicates bug
 				self.Aliases = append(self.Aliases, self.name)
 				srv.Online.Update(self)
-				srv.Respond(eUser, self)
+				srv.Respond(eUser, self) // TODO: Should this be removed?
+				for _, u := range srv.Online {
+					if self.HexifyKey() == u.HexifyKey() {
+						continue
+					}
+					status, err := msgpack.Marshal(Status{Payload: self.HexifyKey(), Status: 10})
+					if err != nil {
+						srv.logger.Error("Couldn't marshal status for roster update: ", err)
+					}
+					u.conn.Write(BuildHeaders(eStatus, len(status)))
+					u.conn.Write(status)
+				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}
 				srv.Respond(eStatus, status)
@@ -217,12 +231,12 @@ func handleConnection(c net.Conn) {
 					continue
 				}
 				// Send it as we get it vs remarshalling
-				log.Debug("MSG: %s -> %s", msg.From, msg.To)
+				log.Debugf("MSG: %s -> %s", msg.From, msg.To)
 				user.conn.Write(BuildHeaders(eMessage, len(datum)))
 				user.conn.Write(datum)
 			} else {
 				srv.db.RPush(redis_prefix+msg.To, datum)
-				status := Status{Payload: "user not available; storing offline", Status: 1}
+				status := Status{Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To), Status: 1}
 				srv.Respond(eStatus, status)
 				continue
 			}
@@ -248,6 +262,7 @@ func main() {
 	}()
 
 	addr := flag.String("addr", ":4321", "The binding address the server should use.")
+	redis_addr := flag.String("redis", "localhost", "The address of the redis server required for function.q")
 	debug := flag.Bool("debug", false, "Set the log level to debug")
 	flag.Parse()
 
@@ -263,5 +278,11 @@ func main() {
 		srv.logger.SetFormatter(&logrus.JSONFormatter{PrettyPrint: true})
 	}
 
-	srv.Init()
+	// Let's do this here.
+	// TODO: This should be in a config.
+	srv.Init(redis.NewClient(&redis.Options{
+		Addr:     *redis_addr,
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	}))
 }

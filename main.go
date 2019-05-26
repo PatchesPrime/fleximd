@@ -204,7 +204,7 @@ func handleConnection(c net.Conn) {
 						srv.logger.Error("Couldn't marshal status for roster update: ", err)
 					}
 					u.conn.Write(BuildHeaders(eStatus, len(status)))
-					u.conn.Write(status)
+					u.conn.Write(status) // TODO: all these things need to have some sort of logging.
 				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}

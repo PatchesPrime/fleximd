@@ -102,6 +102,14 @@ func (o *FleximRoster) Delete(u User) {
 	srv.mutex.Lock()
 	defer srv.mutex.Unlock()
 	delete(srv.Online, u.HexifyKey())
+	for _, user := range srv.Online {
+		status, err := msgpack.Marshal(Status{Payload: u.HexifyKey(), Status: -10})
+		if err != nil {
+			srv.logger.Error("Couldn't marshal status for roster update: ", err)
+		}
+		user.conn.Write(BuildHeaders(eStatus, len(status)))
+		user.conn.Write(status)
+	}
 }
 
 func (o *FleximRoster) Exists(n string) (User, bool) {

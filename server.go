@@ -19,14 +19,8 @@ type fleximd struct {
 	logger      *logrus.Logger
 }
 
-func (o *fleximd) Init() {
-	// Set our DB.
-	o.db = redis.NewClient(&redis.Options{
-		Addr:     "192.168.1.14:32768",
-		Password: "", // no password set
-		DB:       0,  // use default DB
-	})
-
+func (o *fleximd) Init(redisClient *redis.Client) {
+	o.db = redisClient
 	ln, err := net.Listen("tcp", o.BindAddress)
 	if err != nil {
 		o.logger.Error("Couldn't opening listening socket: ", err)
@@ -71,7 +65,7 @@ func (o *fleximd) Shutdown() {
 
 // TODO: Remove super genric "interface{}" for something more specific.
 func (o *fleximd) Respond(t datum, d interface{}) {
-	o.logger.Debugf("SENDING RESPONSE: %+v", d)
+	o.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
 	// Go ahead and attempt to marshal the datum
 	out, err := msgpack.Marshal(d)
 	if err != nil {

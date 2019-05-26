@@ -209,6 +209,7 @@ func handleConnection(c net.Conn) {
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}
 				srv.Respond(eStatus, status)
+				return
 			}
 
 		case eMessage:

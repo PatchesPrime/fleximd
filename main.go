@@ -37,6 +37,24 @@ const (
 	eStatus
 )
 
+func BuildResponse(t datum, d interface{}) []byte {
+	srv.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
+	// Go ahead and attempt to marshal the datum
+	out, err := msgpack.Marshal(d)
+	if err != nil {
+		srv.logger.Error("Couldn't marshal datum: ", err)
+	}
+	// All datum transmissions begin with metadata
+	metadata := make([]byte, 3)
+	metadata[0] = byte(t)
+
+	// We need a uint16 for the last 2 bytes of the metadata.
+	binary.BigEndian.PutUint16(metadata[1:], uint16(len(out)))
+	// o.conn.Write(metadata)
+	// o.conn.Write(out)
+	return append(metadata, out...)
+}
+
 // TODO: Refactor this out. Only used by users now. Shouldn't be too hard.
 func BuildHeaders(d datum, l int) []byte {
 	// We need a 3 byte array
@@ -49,13 +67,13 @@ func BuildHeaders(d datum, l int) []byte {
 	return out
 }
 
-func handleConnection(c net.Conn) {
-	defer c.Close()
+func handleConnection(client net.Conn) {
+	defer client.Close()
 
 	var log = *srv.logger // fite me irl
 
 	protocheck := make([]byte, 5)
-	_, err := io.ReadFull(c, protocheck)
+	_, err := io.ReadFull(client, protocheck)
 	if err != nil {
 		log.Error("Couldn't read bytes for header..", err)
 		return
@@ -68,21 +86,21 @@ func handleConnection(c net.Conn) {
 		if err != nil {
 			log.Error("Couldn't marshal bad header response.", err)
 		}
-		srv.Respond(eStatus, out)
+		client.Write(BuildResponse(eStatus, out))
 		return
 	}
 
 	// TODO: Should this be a pointer rather than value for conn?
-	self := User{name: "guest#" + hex.EncodeToString([]byte(c.RemoteAddr().String())), conn: c} // hahahah
+	self := User{name: "guest#" + hex.EncodeToString([]byte(client.RemoteAddr().String())), conn: client} // hahahah
 	defer self.Cleanup()
 
 	// DatumProcessing:
 	for {
 		// log.Println("DEBUG|", srv.Online)
 		headers := make([]byte, 3)
-		_, err := io.ReadFull(c, headers)
+		_, err := io.ReadFull(client, headers)
 		if err != nil {
-			log.Debug("Client Hangup: ", c.RemoteAddr())
+			log.Debug("Client Hangup: ", client.RemoteAddr())
 			return
 		}
 
@@ -92,7 +110,7 @@ func handleConnection(c net.Conn) {
 
 		// Extract Datum.
 		datum := make([]byte, dLength)
-		_, err = io.ReadFull(c, datum)
+		_, err = io.ReadFull(client, datum)
 		if err != nil {
 			log.Error("Couldn't fill byte buffer, possibly disconnect?")
 			break
@@ -130,7 +148,7 @@ func handleConnection(c net.Conn) {
 				// Stop right here if the user is already online.
 				if _, ok := srv.Online.Exists(self.HexifyKey()); ok {
 					status := Status{Status: -1, Payload: "user already logged in"}
-					srv.Respond(eStatus, status)
+					client.Write(BuildResponse(eStatus, status))
 					continue
 				}
 
@@ -140,21 +158,21 @@ func handleConnection(c net.Conn) {
 				}
 				// Send the Auth datum
 				self.challenge = Auth{Date: time.Now().Unix(), Challenge: strings.TrimSuffix(string(c), "\n")}
-				srv.Respond(eAuth, self.challenge)
+				client.Write(BuildResponse(eAuth, self.challenge))
 
 			case "ROSTER":
 				var roster []User
 				for _, v := range srv.Online {
 					roster = append(roster, v)
 				}
-				srv.Respond(eRoster, roster)
+				client.Write(BuildResponse(eRoster, roster))
 
 			case "GETUSER":
 				if len(cmd.Payload) > 0 {
 					if _, ok := srv.Online.Exists(cmd.Payload[0]); ok {
-						srv.Respond(eUser, srv.Online[cmd.Payload[0]])
+						client.Write(BuildResponse(eUser, srv.Online[cmd.Payload[0]]))
 					} else {
-						srv.Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
+						client.Write(BuildResponse(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"}))
 					}
 				}
 
@@ -167,7 +185,7 @@ func handleConnection(c net.Conn) {
 			case "OFFLINES":
 				if !self.authed {
 					status := Status{Payload: "permission denied; please auth", Status: -1}
-					srv.Respond(eStatus, status)
+					client.Write(BuildResponse(eStatus, status))
 					continue
 				}
 				key := redis_prefix + self.HexifyKey()
@@ -182,7 +200,7 @@ func handleConnection(c net.Conn) {
 						log.Fatal("Couldn't pop off users offlines:", err)
 					}
 					err = msgpack.Unmarshal([]byte(thing), &msg)
-					srv.Respond(eMessage, msg)
+					client.Write(BuildResponse(eMessage, msg))
 				}
 
 			}
@@ -204,7 +222,7 @@ func handleConnection(c net.Conn) {
 				// TODO: remove duplicates bug
 				self.Aliases = append(self.Aliases, self.name)
 				srv.Online.Update(self)
-				srv.Respond(eUser, self) // TODO: Should this be removed?
+				client.Write(BuildResponse(eUser, self)) // TODO: Should this be removed?
 				for _, u := range srv.Online {
 					if self.HexifyKey() == u.HexifyKey() {
 						continue
@@ -218,7 +236,7 @@ func handleConnection(c net.Conn) {
 				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}
-				srv.Respond(eStatus, status)
+				client.Write(BuildResponse(eStatus, status))
 				return
 			}
 
@@ -231,14 +249,14 @@ func handleConnection(c net.Conn) {
 
 			if msg.From != self.HexifyKey() {
 				status := Status{Payload: "spoof detected, please refrain", Status: -1}
-				srv.Respond(eStatus, status)
+				client.Write(BuildResponse(eStatus, status))
 				continue
 			}
 
 			if user, ok := srv.Online.Exists(msg.To); ok {
 				if user.authed && !self.authed {
 					status := Status{Status: -1, Payload: "spim blocker: if one user is authed both must be"}
-					srv.Respond(eStatus, status)
+					client.Write(BuildResponse(eStatus, status))
 					continue
 				}
 				// Send it as we get it vs remarshalling
@@ -248,7 +266,7 @@ func handleConnection(c net.Conn) {
 			} else {
 				srv.db.RPush(redis_prefix+msg.To, datum)
 				status := Status{Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To), Status: 1}
-				srv.Respond(eStatus, status)
+				client.Write(BuildResponse(eStatus, status))
 				continue
 			}
 		}

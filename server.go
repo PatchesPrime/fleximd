@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
 	"github.com/vmihailenco/msgpack"
@@ -61,24 +60,6 @@ func (o *fleximd) Shutdown() {
 		}
 	}
 	os.Exit(0)
-}
-
-// TODO: Remove super genric "interface{}" for something more specific.
-func (o *fleximd) Respond(t datum, d interface{}) {
-	o.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
-	// Go ahead and attempt to marshal the datum
-	out, err := msgpack.Marshal(d)
-	if err != nil {
-		o.logger.Error("Couldn't marshal datum: ", err)
-	}
-	// All datum transmissions begin with metadata
-	metadata := make([]byte, 3)
-	metadata[0] = byte(t)
-
-	// We need a uint16 for the last 2 bytes of the metadata.
-	binary.BigEndian.PutUint16(metadata[1:], uint16(len(out)))
-	o.conn.Write(metadata)
-	o.conn.Write(out)
 }
 
 // TODO: We need to make sure the string is case insensitive.

@@ -148,6 +148,16 @@ func handleConnection(c net.Conn) {
 					roster = append(roster, v)
 				}
 				srv.Respond(eRoster, roster)
+
+			case "GETUSER":
+				if len(cmd.Payload) > 0 {
+					if _, ok := srv.Online.Exists(cmd.Payload[0]); ok {
+						srv.Respond(eUser, srv.Online[cmd.Payload[0]])
+					} else {
+						srv.Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
+					}
+				}
+
 			case "REGISTER":
 				// TODO: replace with not a dummy. This currently only
 				// lasts as long as their connection.

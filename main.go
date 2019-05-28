@@ -176,6 +176,25 @@ func handleConnection(client net.Conn) {
 					}
 				}
 
+			case "SEARCH":
+				if len(cmd.Payload) >= 1 {
+					var result string
+				Search:
+					for _, user := range srv.Online {
+						for _, alias := range user.Aliases {
+							if cmd.Payload[0] == alias {
+								result = user.HexifyKey()
+								break Search
+							}
+						}
+					}
+					if len(result) >= 1 {
+						client.Write(BuildResponse(eStatus, Status{Status: 1, Payload: result}))
+					} else {
+						client.Write(BuildResponse(eStatus, Status{Status: -1, Payload: "alias not found; sorry"}))
+					}
+				}
+
 			case "REGISTER":
 				// TODO: replace with not a dummy. This currently only
 				// lasts as long as their connection.

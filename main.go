@@ -37,27 +37,6 @@ const (
 
 // Custom aliases.
 type datum int
-type FlexClient struct {
-	*net.TCPConn
-}
-
-func (c *FlexClient) Respond(t datum, d interface{}) []byte {
-	srv.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
-	// Go ahead and attempt to marshal the datum
-	out, err := msgpack.Marshal(d)
-	if err != nil {
-		srv.logger.Error("Couldn't marshal datum: ", err)
-	}
-	// All datum transmissions begin with metadata
-	metadata := make([]byte, 3)
-	metadata[0] = byte(t)
-
-	// We need a uint16 for the last 2 bytes of the metadata.
-	binary.BigEndian.PutUint16(metadata[1:], uint16(len(out)))
-	// o.conn.Write(metadata)
-	// o.conn.Write(out)
-	return append(metadata, out...)
-}
 
 // TODO: Refactor this out. Only used by users now. Shouldn't be too hard.
 func BuildHeaders(d datum, l int) []byte {
@@ -87,8 +66,6 @@ func handleConnection(client net.Conn) {
 
 		// We need a uint16 for the last 2 bytes of the metadata.
 		binary.BigEndian.PutUint16(metadata[1:], uint16(len(out)))
-		// o.conn.Write(metadata)
-		// o.conn.Write(out)
 		client.Write(append(metadata, out...))
 	}
 
@@ -116,9 +93,7 @@ func handleConnection(client net.Conn) {
 	self := User{name: "guest#" + hex.EncodeToString([]byte(client.RemoteAddr().String())), conn: client} // hahahah
 	defer self.Cleanup()
 
-	// DatumProcessing:
 	for {
-		// log.Println("DEBUG|", srv.Online)
 		headers := make([]byte, 3)
 		_, err := io.ReadFull(client, headers)
 		if err != nil {
@@ -146,10 +121,9 @@ func handleConnection(client net.Conn) {
 			if err != nil {
 				log.Error("Error processing command datum: ", err)
 			}
+			log.Debugf("GOT COMMAND (%s)", cmd.Cmd)
 			switch cmd.Cmd {
 			case "AUTH":
-				log.Debug("CMD is auth..")
-				// log.Printf("DEBUG| %+v", cmd)
 				// Clearly we need to handle authentication, it's in the TODO
 				// For now, just let it go through with nothing in play until we
 				// plug in encryption.

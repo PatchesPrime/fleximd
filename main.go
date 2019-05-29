@@ -58,7 +58,7 @@ func handleConnection(client net.Conn) {
 	Respond := func(t datum, d interface{}) {
 		safety.Lock()
 		defer safety.Unlock()
-		srv.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
+		srv.logger.Debugf("SENDING RESPONSE (TYPE: %d): %+v", t, d)
 		// Go ahead and attempt to marshal the datum
 		out, err := msgpack.Marshal(d)
 		if err != nil {
@@ -107,7 +107,6 @@ func handleConnection(client net.Conn) {
 
 		// Get datum information from headers.
 		dType, dLength := datum(headers[0]), binary.BigEndian.Uint16(headers[1:])
-		log.Debug("PARSED HEADERS, TYPE:", dType, " LEN:", dLength)
 
 		// Extract Datum.
 		datum := make([]byte, dLength)
@@ -116,7 +115,7 @@ func handleConnection(client net.Conn) {
 			log.Error("Couldn't fill byte buffer, possibly disconnect?")
 			break
 		}
-		log.Debug("RAW DATUM BYTES: ", datum)
+		log.Debug("INCOMING DATUM! TYPE:", dType, " LEN:", dLength, " BYTES:", datum)
 
 		switch dType {
 		case eCommand:

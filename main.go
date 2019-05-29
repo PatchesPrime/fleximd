@@ -192,7 +192,10 @@ func handleConnection(client net.Conn) {
 				key := redis_prefix + self.HexifyKey()
 				l, err := srv.db.LLen(key).Result()
 				if err != nil {
-					log.Fatal("Couldn't get length of users offline array", err)
+					log.Error("Couldn't get length of users offline array", err)
+					status := Status{Payload: "error with backend; contact server admin", Status: -1}
+					self.Respond(eStatus, status)
+					continue
 				}
 				for i := int64(0); i < l; i++ {
 					var msg Message

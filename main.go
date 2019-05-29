@@ -130,7 +130,7 @@ func handleConnection(client net.Conn) {
 
 				// Stop right here if the user is already online.
 				if _, ok := srv.Online.Exists(self.HexifyKey()); ok {
-					status := Status{Status: -1, Payload: "user already logged in"}
+					status := Status{Status: -1, Payload: "user already logged in; " + self.HexifyKey()}
 					self.Respond(eStatus, status)
 					continue
 				}
@@ -174,7 +174,11 @@ func handleConnection(client net.Conn) {
 						if len(result) >= 1 {
 							self.Respond(eRoster, result)
 						} else {
-							self.Respond(eStatus, Status{Status: -1, Payload: "alias not found; sorry"})
+							status := Status{
+								Status:  -1,
+								Payload: fmt.Sprintf("%s not found; unknown alias", cmd.Payload[0]),
+							}
+							self.Respond(eStatus, status)
 						}
 					}()
 				}
@@ -229,12 +233,9 @@ func handleConnection(client net.Conn) {
 					if self.HexifyKey() == u.HexifyKey() {
 						continue
 					}
-					status, err := msgpack.Marshal(Status{Payload: self.HexifyKey(), Status: 10})
-					if err != nil {
-						srv.logger.Error("Couldn't marshal status for roster update: ", err)
-					}
-					u.conn.Write(BuildHeaders(eStatus, len(status)))
-					u.conn.Write(status) // TODO: all these things need to have some sort of logging.
+					u.Respond(eStatus, Status{Payload: self.HexifyKey(), Status: 10})
+					// u.conn.Write(BuildHeaders(eStatus, len(status)))
+					// u.conn.Write(status) // TODO: all these things need to have some sort of logging.
 				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}
@@ -263,8 +264,7 @@ func handleConnection(client net.Conn) {
 				}
 				// Send it as we get it vs remarshalling
 				log.Debugf("MSG: %s -> %s", msg.From, msg.To)
-				user.conn.Write(BuildHeaders(eMessage, len(datum)))
-				user.conn.Write(datum)
+				user.Respond(eMessage, msg)
 			} else {
 				srv.db.RPush(redis_prefix+msg.To, datum)
 				status := Status{Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To), Status: 1}

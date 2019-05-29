@@ -50,7 +50,6 @@ func handleConnection(client net.Conn) {
 		return
 	}
 
-	// TODO: Should this be a pointer rather than value for conn?
 	self := User{
 		name:   "guest#" + hex.EncodeToString([]byte(client.RemoteAddr().String())), // Address to Hex
 		conn:   client,
@@ -130,12 +129,13 @@ func handleConnection(client net.Conn) {
 				if err != nil {
 					log.Fatal("Couldn't generate random bytes")
 				}
-				// Send the Auth datum
-				self.challenge = Auth{
+				// Build Auth datum and save its challenge.
+				challenge := Auth{
 					Date:      time.Now().Unix(),
 					Challenge: hex.EncodeToString(c),
 				}
-				self.Respond(eAuth, self.challenge)
+				self.challenge = challenge.Challenge
+				self.Respond(eAuth, challenge)
 
 			case "ROSTER":
 				var roster []User
@@ -214,10 +214,10 @@ func handleConnection(client net.Conn) {
 			}
 
 			// TODO: It'll do for now, but pretty it up. challenge.Challenge? Please.
-			if resp.Challenge == self.challenge.Challenge && !self.authed {
+			if resp.Challenge == self.challenge && !self.authed {
 				// They seem to be who they claim to be..
 				self.authed = true
-				self.challenge = Auth{} // Empty the value to not store old key in memory longer than needed.
+				self.challenge = "" // clear from memory
 				// TODO: Temporary. We need to actually store these between starts.
 				// TODO: We should also make this happen on register.
 				// TODO: remove duplicates bug

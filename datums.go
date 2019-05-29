@@ -3,9 +3,10 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"github.com/vmihailenco/msgpack"
 	"net"
 	"sync"
+
+	"github.com/vmihailenco/msgpack"
 )
 
 type Datum interface {
@@ -47,7 +48,7 @@ type User struct {
 	authed    bool     // This is used internally to track that state.
 	name      string   // TODO: REMOVE. Used for testing until we discuss how to treat non authed.
 	conn      net.Conn
-	challenge Auth
+	challenge string
 	safety    *sync.Mutex
 }
 

@@ -1,12 +1,13 @@
 package main
 
 import (
-	"github.com/go-redis/redis"
-	"github.com/sirupsen/logrus"
-	"github.com/vmihailenco/msgpack"
 	"net"
 	"os"
 	"sync"
+
+	"github.com/go-redis/redis"
+	"github.com/sirupsen/logrus"
+	"github.com/vmihailenco/msgpack"
 )
 
 type fleximd struct {
@@ -88,8 +89,7 @@ func (o *FleximRoster) Delete(u User) {
 		if err != nil {
 			srv.logger.Error("Couldn't marshal status for roster update: ", err)
 		}
-		user.conn.Write(BuildHeaders(eStatus, len(status)))
-		user.conn.Write(status)
+		user.Respond(eStatus, status)
 	}
 }
 

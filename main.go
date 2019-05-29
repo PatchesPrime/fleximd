@@ -2,21 +2,21 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/go-redis/redis"
-	"github.com/sirupsen/logrus"
-	"github.com/vmihailenco/msgpack"
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-redis/redis"
+	"github.com/sirupsen/logrus"
+	"github.com/vmihailenco/msgpack"
 )
 
 // Was const, now just bytes.
@@ -135,12 +135,16 @@ func handleConnection(client net.Conn) {
 					continue
 				}
 
-				c, err := exec.Command("uuidgen").Output()
+				c := make([]byte, 128)
+				_, err := rand.Read(c)
 				if err != nil {
-					log.Fatal("Couldn't generate uuid")
+					log.Fatal("Couldn't generate random bytes")
 				}
 				// Send the Auth datum
-				self.challenge = Auth{Date: time.Now().Unix(), Challenge: strings.TrimSuffix(string(c), "\n")}
+				self.challenge = Auth{
+					Date:      time.Now().Unix(),
+					Challenge: hex.EncodeToString(c),
+				}
 				self.Respond(eAuth, self.challenge)
 
 			case "ROSTER":

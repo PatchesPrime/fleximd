@@ -64,7 +64,7 @@ func handleConnection(client net.Conn) {
 		if err != nil {
 			log.Error("Couldn't marshal bad header response.", err)
 		}
-		self.Respond(eStatus, out)
+		go self.Respond(eStatus, out)
 		return
 	}
 
@@ -99,7 +99,7 @@ func handleConnection(client net.Conn) {
 			switch cmd.Cmd {
 			case "AUTH":
 				if len(cmd.Payload) < 1 {
-					self.Respond(eStatus, Status{Status: -1, Payload: "AUTH command requires payload"})
+					go self.Respond(eStatus, Status{Status: -1, Payload: "AUTH command requires payload"})
 					continue
 				}
 				// Clearly we need to handle authentication, it's in the TODO
@@ -120,7 +120,7 @@ func handleConnection(client net.Conn) {
 				// Stop right here if the user is already online.
 				if _, ok := srv.Online.Exists(self.HexifyKey()); ok {
 					status := Status{Status: -1, Payload: "user already logged in; " + self.HexifyKey()}
-					self.Respond(eStatus, status)
+					go self.Respond(eStatus, status)
 					continue
 				}
 
@@ -135,21 +135,21 @@ func handleConnection(client net.Conn) {
 					Challenge: hex.EncodeToString(c),
 				}
 				self.challenge = challenge.Challenge
-				self.Respond(eAuth, challenge)
+				go self.Respond(eAuth, challenge)
 
 			case "ROSTER":
 				var roster []User
 				for _, v := range srv.Online {
 					roster = append(roster, v)
 				}
-				self.Respond(eRoster, roster)
+				go self.Respond(eRoster, roster)
 
 			case "GETUSER":
 				if len(cmd.Payload) > 0 {
 					if _, ok := srv.Online.Exists(cmd.Payload[0]); ok {
-						self.Respond(eUser, srv.Online[cmd.Payload[0]])
+						go self.Respond(eUser, srv.Online[cmd.Payload[0]])
 					} else {
-						self.Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
+						go self.Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
 					}
 				}
 
@@ -166,13 +166,13 @@ func handleConnection(client net.Conn) {
 							}
 						}
 						if len(result) >= 1 {
-							self.Respond(eRoster, result)
+							go self.Respond(eRoster, result)
 						} else {
 							status := Status{
 								Status:  -1,
 								Payload: fmt.Sprintf("%s not found; unknown alias", cmd.Payload[0]),
 							}
-							self.Respond(eStatus, status)
+							go self.Respond(eStatus, status)
 						}
 					}()
 				}
@@ -186,7 +186,7 @@ func handleConnection(client net.Conn) {
 			case "OFFLINES":
 				if !self.authed {
 					status := Status{Payload: "permission denied; please auth", Status: -1}
-					self.Respond(eStatus, status)
+					go self.Respond(eStatus, status)
 					continue
 				}
 				key := redis_prefix + self.HexifyKey()
@@ -194,7 +194,7 @@ func handleConnection(client net.Conn) {
 				if err != nil {
 					log.Error("Couldn't get length of users offline array", err)
 					status := Status{Payload: "error with backend; contact server admin", Status: -1}
-					self.Respond(eStatus, status)
+					go self.Respond(eStatus, status)
 					continue
 				}
 				for i := int64(0); i < l; i++ {
@@ -204,7 +204,7 @@ func handleConnection(client net.Conn) {
 						log.Fatal("Couldn't pop off users offlines:", err)
 					}
 					err = msgpack.Unmarshal([]byte(thing), &msg)
-					self.Respond(eMessage, msg)
+					go self.Respond(eMessage, msg)
 				}
 
 			}
@@ -236,7 +236,7 @@ func handleConnection(client net.Conn) {
 				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}
-				self.Respond(eStatus, status)
+				go self.Respond(eStatus, status)
 				return
 			}
 
@@ -249,14 +249,14 @@ func handleConnection(client net.Conn) {
 
 			if msg.From != self.HexifyKey() {
 				status := Status{Payload: "spoof detected, please refrain", Status: -1}
-				self.Respond(eStatus, status)
+				go self.Respond(eStatus, status)
 				continue
 			}
 
 			if user, ok := srv.Online.Exists(msg.To); ok {
 				if user.authed && !self.authed {
 					status := Status{Status: -1, Payload: "spim blocker: if one user is authed both must be"}
-					self.Respond(eStatus, status)
+					go self.Respond(eStatus, status)
 					continue
 				}
 				// Send it as we get it vs remarshalling
@@ -265,7 +265,7 @@ func handleConnection(client net.Conn) {
 			} else {
 				srv.db.RPush(redis_prefix+msg.To, datum)
 				status := Status{Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To), Status: 1}
-				self.Respond(eStatus, status)
+				go self.Respond(eStatus, status)
 				continue
 			}
 		}

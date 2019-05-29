@@ -175,19 +175,22 @@ func handleConnection(client net.Conn) {
 
 			case "SEARCH":
 				if len(cmd.Payload) >= 1 {
-					var result []User
-					for _, user := range srv.Online {
-						for _, alias := range user.Aliases {
-							if cmd.Payload[0] == alias {
-								result = append(result, user)
+					// Because I could? What if there are lots of users?
+					go func() {
+						var result []User
+						for _, user := range srv.Online {
+							for _, alias := range user.Aliases {
+								if cmd.Payload[0] == alias {
+									result = append(result, user)
+								}
 							}
 						}
-					}
-					if len(result) >= 1 {
-						Respond(eRoster, result)
-					} else {
-						Respond(eStatus, Status{Status: -1, Payload: "alias not found; sorry"})
-					}
+						if len(result) >= 1 {
+							Respond(eRoster, result)
+						} else {
+							Respond(eStatus, Status{Status: -1, Payload: "alias not found; sorry"})
+						}
+					}()
 				}
 
 			case "REGISTER":

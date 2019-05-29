@@ -53,6 +53,7 @@ func BuildHeaders(d datum, l int) []byte {
 func handleConnection(client net.Conn) {
 	defer client.Close()
 
+	// Helper function
 	Respond := func(t datum, d interface{}) {
 		srv.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
 		// Go ahead and attempt to marshal the datum
@@ -174,18 +175,16 @@ func handleConnection(client net.Conn) {
 
 			case "SEARCH":
 				if len(cmd.Payload) >= 1 {
-					var result string
-				Search:
+					var result []User
 					for _, user := range srv.Online {
 						for _, alias := range user.Aliases {
 							if cmd.Payload[0] == alias {
-								result = user.HexifyKey()
-								break Search
+								result = append(result, user)
 							}
 						}
 					}
 					if len(result) >= 1 {
-						Respond(eStatus, Status{Status: 1, Payload: result})
+						Respond(eRoster, result)
 					} else {
 						Respond(eStatus, Status{Status: -1, Payload: "alias not found; sorry"})
 					}

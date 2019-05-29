@@ -225,7 +225,6 @@ func handleConnection(client net.Conn) {
 				// TODO: remove duplicates bug
 				self.Aliases = append(self.Aliases, self.name)
 				srv.Online.Update(self)
-				self.Respond(eUser, self) // TODO: Should this be removed
 				for _, u := range srv.Online {
 					if self.HexifyKey() == u.HexifyKey() {
 						continue

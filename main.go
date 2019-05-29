@@ -53,7 +53,7 @@ func handleConnection(client net.Conn) {
 	self := User{
 		name:   "guest#" + hex.EncodeToString([]byte(client.RemoteAddr().String())), // Address to Hex
 		conn:   client,
-		safety: &sync.Mutex{},
+		safety: sync.Mutex{},
 	}
 	defer self.Cleanup()
 

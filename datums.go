@@ -49,7 +49,7 @@ type User struct {
 	name      string   // TODO: REMOVE. Used for testing until we discuss how to treat non authed.
 	conn      net.Conn
 	challenge string
-	safety    *sync.Mutex
+	safety    sync.Mutex
 }
 
 func (o *User) Cleanup() {

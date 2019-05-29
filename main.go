@@ -52,9 +52,12 @@ func BuildHeaders(d datum, l int) []byte {
 
 func handleConnection(client net.Conn) {
 	defer client.Close()
+	safety := sync.Mutex{}
 
 	// Helper function
 	Respond := func(t datum, d interface{}) {
+		safety.Lock()
+		defer safety.Unlock()
 		srv.logger.Debugf("SENDING RESPONSE (TYPE:%s): %+v", t, d)
 		// Go ahead and attempt to marshal the datum
 		out, err := msgpack.Marshal(d)

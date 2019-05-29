@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/hex"
+	"github.com/vmihailenco/msgpack"
 	"net"
+	"sync"
 )
 
 type Datum interface {
@@ -45,6 +48,7 @@ type User struct {
 	name      string   // TODO: REMOVE. Used for testing until we discuss how to treat non authed.
 	conn      net.Conn
 	challenge Auth
+	safety    *sync.Mutex
 }
 
 func (o *User) Cleanup() {
@@ -53,4 +57,22 @@ func (o *User) Cleanup() {
 
 func (o *User) HexifyKey() string {
 	return hex.EncodeToString(o.Key)
+}
+
+func (o *User) Respond(t datum, d interface{}) {
+	o.safety.Lock()
+	defer o.safety.Unlock()
+	srv.logger.Debugf("SENDING RESPONSE (TYPE: %d): %+v", t, d)
+	// Go ahead and attempt to marshal the datum
+	out, err := msgpack.Marshal(d)
+	if err != nil {
+		srv.logger.Error("Couldn't marshal datum: ", err)
+	}
+	// All datum transmissions begin with metadata
+	metadata := make([]byte, 3)
+	metadata[0] = byte(t)
+
+	// We need a uint16 for the last 2 bytes of the metadata.
+	binary.BigEndian.PutUint16(metadata[1:], uint16(len(out)))
+	o.conn.Write(append(metadata, out...))
 }

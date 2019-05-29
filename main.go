@@ -52,26 +52,6 @@ func BuildHeaders(d datum, l int) []byte {
 
 func handleConnection(client net.Conn) {
 	defer client.Close()
-	safety := sync.Mutex{}
-
-	// Helper function
-	Respond := func(t datum, d interface{}) {
-		safety.Lock()
-		defer safety.Unlock()
-		srv.logger.Debugf("SENDING RESPONSE (TYPE: %d): %+v", t, d)
-		// Go ahead and attempt to marshal the datum
-		out, err := msgpack.Marshal(d)
-		if err != nil {
-			srv.logger.Error("Couldn't marshal datum: ", err)
-		}
-		// All datum transmissions begin with metadata
-		metadata := make([]byte, 3)
-		metadata[0] = byte(t)
-
-		// We need a uint16 for the last 2 bytes of the metadata.
-		binary.BigEndian.PutUint16(metadata[1:], uint16(len(out)))
-		client.Write(append(metadata, out...))
-	}
 
 	var log = *srv.logger // fite me irl
 
@@ -82,6 +62,14 @@ func handleConnection(client net.Conn) {
 		return
 	}
 
+	// TODO: Should this be a pointer rather than value for conn?
+	self := User{
+		name:   "guest#" + hex.EncodeToString([]byte(client.RemoteAddr().String())), // Address to Hex
+		conn:   client,
+		safety: &sync.Mutex{},
+	}
+	defer self.Cleanup()
+
 	if !bytes.Equal(protocheck, helo) {
 		log.Debug("BAD HEADER:", string(protocheck))
 		resp := Status{Status: -1, Payload: "invalid flexim header"}
@@ -89,13 +77,9 @@ func handleConnection(client net.Conn) {
 		if err != nil {
 			log.Error("Couldn't marshal bad header response.", err)
 		}
-		Respond(eStatus, out)
+		self.Respond(eStatus, out)
 		return
 	}
-
-	// TODO: Should this be a pointer rather than value for conn?
-	self := User{name: "guest#" + hex.EncodeToString([]byte(client.RemoteAddr().String())), conn: client} // hahahah
-	defer self.Cleanup()
 
 	for {
 		headers := make([]byte, 3)
@@ -147,7 +131,7 @@ func handleConnection(client net.Conn) {
 				// Stop right here if the user is already online.
 				if _, ok := srv.Online.Exists(self.HexifyKey()); ok {
 					status := Status{Status: -1, Payload: "user already logged in"}
-					Respond(eStatus, status)
+					self.Respond(eStatus, status)
 					continue
 				}
 
@@ -157,21 +141,21 @@ func handleConnection(client net.Conn) {
 				}
 				// Send the Auth datum
 				self.challenge = Auth{Date: time.Now().Unix(), Challenge: strings.TrimSuffix(string(c), "\n")}
-				Respond(eAuth, self.challenge)
+				self.Respond(eAuth, self.challenge)
 
 			case "ROSTER":
 				var roster []User
 				for _, v := range srv.Online {
 					roster = append(roster, v)
 				}
-				Respond(eRoster, roster)
+				self.Respond(eRoster, roster)
 
 			case "GETUSER":
 				if len(cmd.Payload) > 0 {
 					if _, ok := srv.Online.Exists(cmd.Payload[0]); ok {
-						Respond(eUser, srv.Online[cmd.Payload[0]])
+						self.Respond(eUser, srv.Online[cmd.Payload[0]])
 					} else {
-						Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
+						self.Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
 					}
 				}
 
@@ -188,9 +172,9 @@ func handleConnection(client net.Conn) {
 							}
 						}
 						if len(result) >= 1 {
-							Respond(eRoster, result)
+							self.Respond(eRoster, result)
 						} else {
-							Respond(eStatus, Status{Status: -1, Payload: "alias not found; sorry"})
+							self.Respond(eStatus, Status{Status: -1, Payload: "alias not found; sorry"})
 						}
 					}()
 				}
@@ -204,7 +188,7 @@ func handleConnection(client net.Conn) {
 			case "OFFLINES":
 				if !self.authed {
 					status := Status{Payload: "permission denied; please auth", Status: -1}
-					Respond(eStatus, status)
+					self.Respond(eStatus, status)
 					continue
 				}
 				key := redis_prefix + self.HexifyKey()
@@ -219,7 +203,7 @@ func handleConnection(client net.Conn) {
 						log.Fatal("Couldn't pop off users offlines:", err)
 					}
 					err = msgpack.Unmarshal([]byte(thing), &msg)
-					Respond(eMessage, msg)
+					self.Respond(eMessage, msg)
 				}
 
 			}
@@ -241,7 +225,7 @@ func handleConnection(client net.Conn) {
 				// TODO: remove duplicates bug
 				self.Aliases = append(self.Aliases, self.name)
 				srv.Online.Update(self)
-				Respond(eUser, self) // TODO: Should this be removed
+				self.Respond(eUser, self) // TODO: Should this be removed
 				for _, u := range srv.Online {
 					if self.HexifyKey() == u.HexifyKey() {
 						continue
@@ -255,7 +239,7 @@ func handleConnection(client net.Conn) {
 				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}
-				Respond(eStatus, status)
+				self.Respond(eStatus, status)
 				return
 			}
 
@@ -268,14 +252,14 @@ func handleConnection(client net.Conn) {
 
 			if msg.From != self.HexifyKey() {
 				status := Status{Payload: "spoof detected, please refrain", Status: -1}
-				Respond(eStatus, status)
+				self.Respond(eStatus, status)
 				continue
 			}
 
 			if user, ok := srv.Online.Exists(msg.To); ok {
 				if user.authed && !self.authed {
 					status := Status{Status: -1, Payload: "spim blocker: if one user is authed both must be"}
-					Respond(eStatus, status)
+					self.Respond(eStatus, status)
 					continue
 				}
 				// Send it as we get it vs remarshalling
@@ -285,7 +269,7 @@ func handleConnection(client net.Conn) {
 			} else {
 				srv.db.RPush(redis_prefix+msg.To, datum)
 				status := Status{Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To), Status: 1}
-				Respond(eStatus, status)
+				self.Respond(eStatus, status)
 				continue
 			}
 		}

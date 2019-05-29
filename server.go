@@ -83,9 +83,13 @@ func (o *FleximRoster) Delete(u User) {
 	srv.mutex.Lock()
 	defer srv.mutex.Unlock()
 	delete(srv.Online, u.HexifyKey())
-	for _, user := range srv.Online {
-		user.Respond(eStatus, Status{Payload: u.HexifyKey(), Status: -10})
-	}
+
+	// Notify the users
+	go func() {
+		for _, user := range srv.Online {
+			user.Respond(eStatus, Status{Payload: u.HexifyKey(), Status: -10})
+		}
+	}()
 }
 
 func (o *FleximRoster) Exists(n string) (User, bool) {

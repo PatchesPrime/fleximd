@@ -38,18 +38,6 @@ const (
 // Custom aliases.
 type datum int
 
-// TODO: Refactor this out. Only used by users now. Shouldn't be too hard.
-func BuildHeaders(d datum, l int) []byte {
-	// We need a 3 byte array
-	out := make([]byte, 3)
-
-	// The first one is always the datum type, follow by 2 bytes representing uint16
-	out[0] = byte(d)
-	binary.BigEndian.PutUint16(out[1:], uint16(l))
-
-	return out
-}
-
 func handleConnection(client net.Conn) {
 	defer client.Close()
 
@@ -111,17 +99,19 @@ func handleConnection(client net.Conn) {
 			log.Debugf("GOT COMMAND (%s)", cmd.Cmd)
 			switch cmd.Cmd {
 			case "AUTH":
+				if len(cmd.Payload) < 1 {
+					self.Respond(eStatus, Status{Status: -1, Payload: "AUTH command requires payload"})
+					continue
+				}
 				// Clearly we need to handle authentication, it's in the TODO
 				// For now, just let it go through with nothing in play until we
 				// plug in encryption.
 				if cmd.Payload[0] != "guest" {
-					// self.authed = true
 					if len(cmd.Payload) >= 2 {
 						self.name = cmd.Payload[1]
 					} else {
 						self.name = cmd.Payload[0]
 					}
-					// TODO: Bit of a thing, thought I'd mention it: MAKE SURE THEY HAVE THE KEY.
 					self.Key, err = hex.DecodeString(cmd.Payload[0])
 					if err != nil {
 						log.Error("Couldn't decode hex of", cmd.Payload[0])

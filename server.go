@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
-	"github.com/vmihailenco/msgpack"
 )
 
 type fleximd struct {
@@ -85,11 +84,7 @@ func (o *FleximRoster) Delete(u User) {
 	defer srv.mutex.Unlock()
 	delete(srv.Online, u.HexifyKey())
 	for _, user := range srv.Online {
-		status, err := msgpack.Marshal(Status{Payload: u.HexifyKey(), Status: -10})
-		if err != nil {
-			srv.logger.Error("Couldn't marshal status for roster update: ", err)
-		}
-		user.Respond(eStatus, status)
+		user.Respond(eStatus, Status{Payload: u.HexifyKey(), Status: -10})
 	}
 }
 

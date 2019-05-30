@@ -247,7 +247,12 @@ func handleConnection(client net.Conn) {
 				log.Error("Error processing command datum: ", err)
 			}
 
-			if msg.From != self.HexifyKey() {
+			key, err := hex.DecodeString(msg.From)
+			if err != nil {
+				log.Error("Couldn't decode hex of msg.From")
+			}
+
+			if !bytes.Equal(key, self.Key) {
 				status := Status{Payload: "spoof detected, please refrain", Status: -1}
 				go self.Respond(eStatus, status)
 				continue

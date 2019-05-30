@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/vmihailenco/msgpack"
@@ -57,7 +58,7 @@ func (o *User) Cleanup() {
 }
 
 func (o *User) HexifyKey() string {
-	return hex.EncodeToString(o.Key)
+	return strings.ToUpper(hex.EncodeToString(o.Key))
 }
 
 func (o *User) Respond(t datum, d interface{}) {

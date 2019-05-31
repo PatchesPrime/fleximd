@@ -145,9 +145,25 @@ func handleConnection(client net.Conn) {
 
 			case "GHOST":
 				if len(cmd.Payload) > 0 {
-					challenge := srv.BuildAuth(128)
-					self.challenge = challenge.Challenge
-					go self.Respond(eAuth, challenge)
+					if user, ok := srv.Online.Exists(cmd.Payload[0]); ok {
+						// Notify user of ghost attempt
+						status := Status{
+							Status:  5,
+							Payload: "warning; ghost event triggered by " + self.conn.RemoteAddr().String(),
+						}
+						user.Respond(eStatus, status)
+
+						// Challenge
+						challenge := srv.BuildAuth(128)
+						self.challenge = challenge.Challenge
+						go self.Respond(eAuth, challenge)
+					} else {
+						status := Status{
+							Status:  -1,
+							Payload: "key not online; rejected",
+						}
+						user.Respond(eStatus, status)
+					}
 				}
 
 			case "SEARCH":

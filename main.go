@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 
 	"github.com/go-redis/redis"
@@ -64,6 +65,12 @@ func handleConnection(client net.Conn) {
 		}
 		go self.Respond(eStatus, out)
 		return
+	} else {
+		// According to RFC we respond with a key immediately after passing HELLO check
+		go self.Respond(eStatus, Status{
+			Status:  127,
+			Payload: "TESTKEY; NOT IMPLEMENTED PLEASE IGNORE",
+		})
 	}
 
 	for {
@@ -276,18 +283,26 @@ func handleConnection(client net.Conn) {
 				continue
 			}
 
-			if user, ok := srv.Online.Exists(msg.To); ok {
+			// The only information about messages the server will ever read.
+			// It wouldn't even read this if routing the messages wasn't literally
+			// its only reason for existing. It cannot function without FROM & TO.
+			from, to := strings.ToUpper(msg.From), strings.ToUpper(msg.To)
+
+			if user, ok := srv.Online.Exists(from); ok {
 				if user.authed && !self.authed {
 					status := Status{Status: -1, Payload: "spim blocker: if one user is authed both must be"}
 					go self.Respond(eStatus, status)
 					continue
 				}
 				// Send it as we get it vs remarshalling
-				log.Debugf("MSG: %s -> %s", msg.From, msg.To)
+				log.Debugf("MSG: %s -> %s", from, to)
 				user.Respond(eMessage, msg)
 			} else {
 				srv.db.RPush(redis_prefix+msg.To, datum)
-				status := Status{Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To), Status: 1}
+				status := Status{
+					Payload: fmt.Sprintf("user \"%+v\" not available; storing offline", msg.To),
+					Status:  1,
+				}
 				go self.Respond(eStatus, status)
 				continue
 			}

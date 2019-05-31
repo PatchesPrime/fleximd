@@ -1,9 +1,13 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"log"
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
@@ -60,6 +64,19 @@ func (o *fleximd) Shutdown() {
 		}
 	}
 	os.Exit(0)
+}
+
+func (o *fleximd) BuildAuth(n int) Auth {
+	c := make([]byte, n)
+	_, err := rand.Read(c)
+	if err != nil {
+		log.Fatal("Couldn't generate random bytes")
+	}
+	challenge := Auth{
+		Date:      time.Now().Unix(),
+		Challenge: hex.EncodeToString(c),
+	}
+	return challenge
 }
 
 // TODO: We need to make sure the string is case insensitive.

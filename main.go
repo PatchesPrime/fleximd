@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"flag"
@@ -12,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"time"
 
 	"github.com/go-redis/redis"
 	"github.com/sirupsen/logrus"
@@ -124,16 +122,8 @@ func handleConnection(client net.Conn) {
 					continue
 				}
 
-				c := make([]byte, 128)
-				_, err := rand.Read(c)
-				if err != nil {
-					log.Fatal("Couldn't generate random bytes")
-				}
-				// Build Auth datum and save its challenge.
-				challenge := Auth{
-					Date:      time.Now().Unix(),
-					Challenge: hex.EncodeToString(c),
-				}
+				// Build and challenge user
+				challenge := srv.BuildAuth(128)
 				self.challenge = challenge.Challenge
 				go self.Respond(eAuth, challenge)
 
@@ -151,6 +141,13 @@ func handleConnection(client net.Conn) {
 					} else {
 						go self.Respond(eStatus, Status{Status: -1, Payload: "GETUSER failed; unknown key"})
 					}
+				}
+
+			case "GHOST":
+				if len(cmd.Payload) > 0 {
+					challenge := srv.BuildAuth(128)
+					self.challenge = challenge.Challenge
+					go self.Respond(eAuth, challenge)
 				}
 
 			case "SEARCH":
@@ -218,6 +215,11 @@ func handleConnection(client net.Conn) {
 
 			// TODO: It'll do for now, but pretty it up. challenge.Challenge? Please.
 			if resp.Challenge == self.challenge && !self.authed {
+				// If we have a valid AuthResponse and that person is online, ghost them.
+				if ghost, ok := srv.Online.Exists(self.HexifyKey()); ok {
+					ghost.conn.Close()
+				}
+
 				// They seem to be who they claim to be..
 				self.authed = true
 				self.challenge = "" // clear from memory

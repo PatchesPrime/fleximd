@@ -79,7 +79,6 @@ func (o *fleximd) BuildAuth(n int) Auth {
 	return challenge
 }
 
-// TODO: We need to make sure the string is case insensitive.
 type FleximRoster map[string]User
 
 func (o *FleximRoster) Append(u User) {

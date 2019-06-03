@@ -236,7 +236,6 @@ func handleConnection(client net.Conn) {
 				log.Error("Something went wrong unmarshalling AuthResp", err)
 			}
 
-			// TODO: It'll do for now, but pretty it up. challenge.Challenge? Please.
 			if resp.Challenge == self.challenge && !self.authed {
 				// If we have a valid AuthResponse and that person is online, ghost them.
 				if ghost, ok := srv.Online.Exists(self.HexifyKey()); ok {
@@ -256,8 +255,6 @@ func handleConnection(client net.Conn) {
 						continue
 					}
 					u.Respond(eStatus, Status{Payload: self.HexifyKey(), Status: 10})
-					// u.conn.Write(BuildHeaders(eStatus, len(status)))
-					// u.conn.Write(status) // TODO: all these things need to have some sort of logging.
 				}
 			} else {
 				status := Status{Payload: "challenge failed; bye", Status: -1}

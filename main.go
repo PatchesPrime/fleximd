@@ -285,7 +285,7 @@ func handleConnection(client net.Conn) {
 			// its only reason for existing. It cannot function without FROM & TO.
 			from, to := strings.ToUpper(msg.From), strings.ToUpper(msg.To)
 
-			if user, ok := srv.Online.Exists(from); ok {
+			if user, ok := srv.Online.Exists(to); ok {
 				if user.authed && !self.authed {
 					status := Status{Status: -1, Payload: "spim blocker: if one user is authed both must be"}
 					go self.Respond(eStatus, status)
